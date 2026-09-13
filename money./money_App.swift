@@ -9,9 +9,11 @@ import SwiftUI
 
 @main
 struct money_App: App {
+    @State private var store = AppStore.loadFromDisk()
+
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentView(store: store)
         }
     }
 }
