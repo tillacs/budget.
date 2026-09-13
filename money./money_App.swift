@@ -11,9 +11,19 @@ import SwiftUI
 struct money_App: App {
     @State private var store = AppStore.loadFromDisk()
 
+    /// Startanimation der Wortmarke — läuft einmal pro Kaltstart.
+    @State private var showLaunch = true
+
     var body: some Scene {
         WindowGroup {
-            ContentView(store: store)
+            ZStack {
+                ContentView(store: store)
+
+                if showLaunch {
+                    LaunchWordmark(stem: "budget") { showLaunch = false }
+                        .transition(.opacity)
+                }
+            }
         }
     }
 }
