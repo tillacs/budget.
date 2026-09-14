@@ -32,6 +32,7 @@ struct HomeScreen: View {
     @State private var expanded: UUID?
     @State private var sheet: HomeSheet?
     @State private var flight: Flight?
+    @Namespace private var totalsSlide
     @State private var pendingFlight: Flight?
 
     private let router = QuickEntryRouter.shared
@@ -94,10 +95,15 @@ struct HomeScreen: View {
     private var overview: some View {
         ZStack(alignment: .bottomTrailing) {
             ScrollView {
-                VStack(spacing: 22) {
+                // Kein gleichmäßiger Abstand: Der Ring bekommt Luft, die Summen
+                // hängen an ihm dran, und die Liste setzt neu an.
+                VStack(spacing: 0) {
                     header
+                        .padding(.bottom, 4)
                     rings
+                        .padding(.bottom, 20)
                     totals
+                        .padding(.bottom, 26)
                     LedgerSection(
                         store: store,
                         ring: summary.ring(listDirection),
@@ -160,7 +166,7 @@ struct HomeScreen: View {
 
     @ViewBuilder
     private var ringCenter: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 2) {
             monthMenu
 
             if let slice = selectedSlice {
@@ -190,17 +196,20 @@ struct HomeScreen: View {
             } else {
                 let figure = centerFigure
                 Text(figure.text)
-                    .font(.system(size: 44, weight: .semibold))
+                    .font(.system(size: 48, weight: .semibold))
                     .monospacedDigit()
-                    .tracking(-1.4)
+                    .tracking(-1.8)
                     .contentTransition(.numericText())
                     .foregroundStyle(figure.tone)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.5)
-                    .padding(.top, 2)
+                    .minimumScaleFactor(0.45)
+                    .padding(.top, 4)
                 Text(figure.caption)
-                    .font(.caption)
+                    .font(.system(size: 10, weight: .semibold))
+                    .textCase(.uppercase)
+                    .kerning(1.4)
                     .foregroundStyle(Palette.faint)
+                    .padding(.top, 2)
             }
         }
         .padding(.horizontal, 8)
@@ -224,18 +233,20 @@ struct HomeScreen: View {
                 }
             }
         } label: {
+            // Ohne Kapsel: In der Ringmitte zählt jede Fläche, die nicht die Zahl ist.
             HStack(spacing: 3) {
                 Text(MoneyFormat.month(month))
                     .contentTransition(.numericText())
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(.system(size: 8, weight: .bold))
+                    .padding(.top, 1)
             }
             .font(.footnote.weight(.medium))
             .foregroundStyle(Palette.muted)
             .lineLimit(1)
-            .padding(.vertical, 4)
-            .padding(.horizontal, 10)
-            .background(Capsule().fill(Palette.raised.opacity(0.7)))
+            .padding(.vertical, 6)
+            .padding(.horizontal, 8)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Monat: \(MoneyFormat.month(month))")
@@ -279,13 +290,17 @@ struct HomeScreen: View {
 
     // MARK: - Summen
 
+    /// Ein Gerät statt zwei Kästen: Die beiden Summen sitzen in einer Fassung, und
+    /// die aktive Seite wird von einer Fläche unterlegt, die zwischen ihnen wandert.
+    /// Damit ist auf einen Blick klar, dass es sich um einen Umschalter handelt.
     private var totals: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 0) {
             ForEach(Direction.allCases, id: \.self) { direction in
-                TotalPill(
+                TotalSegment(
                     direction: direction,
                     total: summary.ring(direction).total,
-                    isActive: listDirection == direction
+                    isActive: listDirection == direction,
+                    slide: totalsSlide
                 ) {
                     withAnimation(motion) {
                         listDirection = direction
@@ -295,6 +310,12 @@ struct HomeScreen: View {
                 }
             }
         }
+        .padding(4)
+        .background(
+            RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Palette.card))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(Palette.hairline, lineWidth: 1))
     }
 
     // MARK: - Erfassen
@@ -304,9 +325,9 @@ struct HomeScreen: View {
             sheet = .quickEntry(.expense)
         } label: {
             Image(systemName: "plus")
-                .font(.system(size: 26, weight: .medium))
+                .font(.system(size: 25, weight: .medium))
                 .foregroundStyle(Palette.canvas)
-                .frame(width: 62, height: 62)
+                .frame(width: 58, height: 58)
                 .background(Circle().fill(Palette.ink))
                 .shadow(color: .black.opacity(0.25), radius: 12, y: 6)
         }
@@ -395,44 +416,45 @@ private struct CategoriesGlyph: View {
     }
 }
 
-/// Eine der beiden Summen unter den Ringen. Das Zeichen links ist der Ring selbst
-/// im Kleinen: außen dick für Ausgaben, innen dünn für Einnahmen — damit klar ist,
-/// welche Summe zu welchem Ring gehört, ohne ein Wort darüber zu verlieren.
-private struct TotalPill: View {
+/// Eine der beiden Summen. Das Zeichen links ist der Ring selbst im Kleinen: außen
+/// dick für Ausgaben, innen dünn für Einnahmen — damit klar ist, welche Summe zu
+/// welchem Ring gehört, ohne ein Wort darüber zu verlieren.
+private struct TotalSegment: View {
     let direction: Direction
     let total: Decimal
     let isActive: Bool
+    let slide: Namespace.ID
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 10) {
+            HStack(spacing: 9) {
                 RingGlyph(direction: direction, isActive: isActive)
 
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: 0) {
                     Text(direction.plural)
-                        .font(.caption)
-                        .foregroundStyle(Palette.muted)
+                        .font(.caption2)
+                        .foregroundStyle(isActive ? Palette.muted : Palette.faint)
                     Text(MoneyFormat.hero(total))
-                        .font(.system(size: 19, weight: .semibold))
+                        .font(.system(size: 18, weight: .semibold))
                         .monospacedDigit()
                         .contentTransition(.numericText())
-                        .foregroundStyle(Palette.ink)
+                        .foregroundStyle(isActive ? Palette.ink : Palette.muted)
                         .lineLimit(1)
                         .minimumScaleFactor(0.6)
                 }
                 Spacer(minLength: 0)
             }
-            .padding(.vertical, 12)
-            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
+            .padding(.horizontal, 12)
             .frame(maxWidth: .infinity)
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(isActive ? Palette.card : Palette.card.opacity(0.55)))
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .strokeBorder(isActive ? Palette.ink.opacity(0.35) : Palette.hairline,
-                                  lineWidth: isActive ? 1.5 : 1))
+            .background {
+                if isActive {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(Palette.raised)
+                        .matchedGeometryEffect(id: "aktiv", in: slide)
+                }
+            }
         }
         .buttonStyle(PressableRowStyle())
         .accessibilityLabel("\(direction.plural), \(MoneyFormat.amount(total))")

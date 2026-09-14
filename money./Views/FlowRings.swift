@@ -27,11 +27,12 @@ struct FlowRings<Center: View>: View {
 
     // MARK: Maße
 
-    /// Strichstärken: Der äußere Ring ist deutlich kräftiger, damit die beiden Ringe
-    /// auch ohne Beschriftung nicht verwechselbar sind.
-    private let outerWidth: CGFloat = 20
-    private let innerWidth: CGFloat = 11
-    private let ringGap: CGFloat = 9
+    /// Strichstärken: Der äußere Ring ist deutlich kräftiger. Das trennt die beiden
+    /// Ringe nicht nur voneinander — es setzt auch die Rangfolge. Die Ausgaben sind
+    /// das, worum es in dieser App geht; die Einnahmen sind der Maßstab dazu.
+    private let outerWidth: CGFloat = 23
+    private let innerWidth: CGFloat = 9
+    private let ringGap: CGFloat = 10
 
     var body: some View {
         GeometryReader { proxy in

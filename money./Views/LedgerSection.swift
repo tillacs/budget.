@@ -23,7 +23,7 @@ struct LedgerSection: View {
                 emptyRow
             } else {
                 ForEach(Array(ring.slices.enumerated()), id: \.element.id) { index, slice in
-                    if index > 0 { RowDivider(inset: Metrics.cardPadding + 52) }
+                    if index > 0 { RowDivider(inset: Metrics.cardPadding + 50) }
                     row(slice)
                     if expanded == slice.id {
                         entryList(for: slice)
@@ -48,44 +48,53 @@ struct LedgerSection: View {
     // MARK: - Kategoriezeile
 
     private func row(_ slice: Slice) -> some View {
-        Button {
+        let isSelected = selection?.categoryID == slice.category.id
+        return Button {
             toggle(slice)
         } label: {
-            HStack(spacing: 10) {
-                CategoryBadge(category: slice.category)
+            VStack(spacing: 8) {
+                HStack(spacing: 12) {
+                    CategoryBadge(category: slice.category, side: 38)
 
-                HStack(spacing: 6) {
-                    Text(slice.category.name)
-                        .font(.body.weight(.medium))
+                    HStack(spacing: 6) {
+                        Text(slice.category.name)
+                            .font(.body.weight(.medium))
+                            .foregroundStyle(Palette.ink)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                        CountChip(count: slice.count)
+                    }
+                    // Der Name gibt als Letztes nach: Zahlen kann man kürzen, einen
+                    // abgeschnittenen Kategorienamen kann man nicht lesen.
+                    .layoutPriority(1)
+
+                    Spacer(minLength: 6)
+
+                    Text(MoneyFormat.hero(slice.total))
+                        .font(.callout.weight(.semibold))
+                        .monospacedDigit()
+                        .contentTransition(.numericText())
                         .foregroundStyle(Palette.ink)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                    CountChip(count: slice.count)
+
+                    Text(MoneyFormat.share(slice.share))
+                        .font(.caption2)
+                        .monospacedDigit()
+                        .foregroundStyle(Palette.faint)
+                        .frame(width: 42, alignment: .trailing)
                 }
-                // Der Name gibt als Letztes nach: Zahlen kann man kürzen, einen
-                // abgeschnittenen Kategorienamen kann man nicht lesen.
-                .layoutPriority(1)
 
-                Spacer(minLength: 6)
-
-                Text(MoneyFormat.hero(slice.total))
-                    .font(.callout.weight(.semibold))
-                    .monospacedDigit()
-                    .contentTransition(.numericText())
-                    .foregroundStyle(Palette.ink)
-                    .lineLimit(1)
-
-                Text(MoneyFormat.share(slice.share))
-                    .font(.caption2)
-                    .monospacedDigit()
-                    .foregroundStyle(Palette.faint)
-                    .padding(.vertical, 3)
-                    .padding(.horizontal, 6)
-                    .background(Capsule().fill(Palette.raised))
-                    .frame(width: 50, alignment: .trailing)
+                // Der Balken bekommt eine eigene Ebene, statt in der Zeile um Platz
+                // zu konkurrieren — sonst drängt er die Beträge aus dem Bild.
+                shareBar(slice)
+                    .padding(.leading, 50)
             }
             .padding(.horizontal, Metrics.cardPadding)
-            .padding(.vertical, 14)
+            .padding(.vertical, 12)
+            // Die ausgewählte Zeile trägt einen Hauch ihrer eigenen Farbe. Damit
+            // schließt sich der Kreis zum Ring: dort leuchtet dasselbe Segment.
+            .background(
+                Palette.tint(slice.category.tint).opacity(isSelected ? 0.09 : 0))
             .contentShape(Rectangle())
         }
         .buttonStyle(PressableRowStyle())
@@ -93,6 +102,25 @@ struct LedgerSection: View {
             "\(slice.category.name), \(MoneyFormat.amount(slice.total)), "
                 + "\(MoneyFormat.share(slice.share)) der \(ring.direction.plural)")
         .accessibilityHint(expanded == slice.id ? "Buchungen ausblenden" : "Buchungen anzeigen")
+    }
+
+    /// Der Anteil als Strich in der Kategorienfarbe.
+    ///
+    /// Die Prozentzahl daneben sagt dasselbe, aber man muss sie lesen. Der Strich
+    /// macht aus der Liste ein Bild: Man sieht die Rangfolge, ohne eine einzige Zahl
+    /// anzusehen — und es ist dieselbe Farbe wie im Ring darüber.
+    private func shareBar(_ slice: Slice) -> some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Palette.track)
+                Capsule()
+                    .fill(Palette.tint(slice.category.tint))
+                    .frame(width: max(4, proxy.size.width * slice.share))
+            }
+        }
+        .frame(height: 3)
+        .accessibilityHidden(true)
     }
 
     // MARK: - Buchungen einer Kategorie
@@ -104,7 +132,10 @@ struct LedgerSection: View {
             }
         }
         .padding(.bottom, 6)
+        // Derselbe Farbhauch wie in der Zeile darüber: Aufgeklapptes gehört sichtbar
+        // zu der Kategorie, aus der es kommt.
         .background(Palette.raised.opacity(0.5))
+        .background(Palette.tint(slice.category.tint).opacity(0.05))
         .transition(.opacity.combined(with: .move(edge: .top)))
     }
 
