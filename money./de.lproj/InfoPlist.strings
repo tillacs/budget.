@@ -1,0 +1,4 @@
+/* budget. spricht Deutsch. Diese Datei meldet dem System, dass das Bundle eine
+   deutsche Lokalisierung hat — ohne sie behandelt iOS die App als englisch, und
+   Kurzbefehle liest dann „7,77" als 7. */
+"CFBundleDisplayName" = "budget.";

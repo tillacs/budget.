@@ -24,6 +24,7 @@ struct SettingsSheet: View {
         NavigationStack {
             List {
                 backTapSection
+                actionsSection
                 categorySection(.expense)
                 categorySection(.income)
                 dataSection
@@ -67,8 +68,8 @@ struct SettingsSheet: View {
     private var backTapSection: some View {
         Section {
             VStack(alignment: .leading, spacing: 14) {
-                step(1, "In der Kurzbefehle-App einen neuen Kurzbefehl anlegen und die "
-                    + "Aktion \u{201E}Ausgabe erfassen\u{201C} aus budget. hinzufügen.")
+                step(1, "In der Kurzbefehle-App einen neuen Kurzbefehl anlegen und eine "
+                    + "der Aktionen von budget. hinzufügen — welche, steht unten.")
                 step(2, "In den Einstellungen: Bedienungshilfen → Tippen → "
                     + "Auf Rückseite tippen → Doppeltippen.")
                 step(3, "Ganz unten unter \u{201E}Kurzbefehle\u{201C} den neuen Kurzbefehl auswählen.")
@@ -90,10 +91,42 @@ struct SettingsSheet: View {
         } header: {
             Text("Doppeltipp auf die Rückseite")
         } footer: {
-            Text("Danach genügt zweimal Tippen auf die Rückseite des iPhones: budget. öffnet "
-                + "sich direkt im Ziffernblock. Für Einnahmen gibt es die Aktion "
-                + "\u{201E}Einnahme erfassen\u{201C} — die passt auf den Dreifachtipp.")
+            Text("Danach genügt zweimal Tippen auf die Rückseite des iPhones.")
         }
+    }
+
+    /// Drei Aktionen, und sie unterscheiden sich in genau einer Frage: Will man den
+    /// Ziffernblock der App — oder will man bleiben, wo man gerade ist?
+    private var actionsSection: some View {
+        Section {
+            actionRow(
+                "Buchung erfassen",
+                "Fragt in zwei Einblendungen nach Kategorie und Betrag und bucht, ohne "
+                    + "budget. zu öffnen. Man bleibt in der App, in der man gerade war.")
+            actionRow(
+                "Ausgabe erfassen",
+                "Öffnet budget. im Ziffernblock, mit vorausgewählter Kategorie. Der "
+                    + "schnellere Weg, wenn man ohnehin auf die Ringe schauen will.")
+            actionRow(
+                "Einnahme erfassen",
+                "Dasselbe für Einnahmen — passt gut auf den Dreifachtipp.")
+        } header: {
+            Text("Die drei Aktionen")
+        }
+    }
+
+    private func actionRow(_ title: String, _ detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Palette.ink)
+            Text(detail)
+                .font(.caption)
+                .foregroundStyle(Palette.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.vertical, 4)
+        .listRowBackground(Palette.card)
     }
 
     private func step(_ number: Int, _ text: String) -> some View {

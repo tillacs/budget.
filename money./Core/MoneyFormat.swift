@@ -35,6 +35,49 @@ nonisolated enum MoneyFormat {
         value.formatted(.percent.precision(.fractionLength(value < 0.1 ? 1 : 0)))
     }
 
+    /// Einen getippten Betrag lesen — so, wie ihn jemand hinschreibt.
+    ///
+    /// Nötig, weil der Zahlen-Resolver von App Intents die Nachkommastellen einer
+    /// Eingabe wegwirft: Aus „7,77" wird dort 7. Der Betrag kommt deshalb als Text
+    /// aus dem Kurzbefehl und wird hier gelesen.
+    ///
+    /// Komma und Punkt gelten beide, weil die Tastatur beide anbietet:
+    ///
+    /// - Stehen beide da, trennt das letzte die Nachkommastellen ab. „1.234,56" und
+    ///   „1,234.56" sind damit derselbe Betrag.
+    /// - Steht nur ein Komma da, ist es das Dezimalkomma. Im Deutschen ist ein Komma
+    ///   nie ein Tausendertrennzeichen, also sind „1,005" ein Euro und ein halber Cent.
+    /// - Steht nur ein einzelner Punkt da und folgen ihm genau drei Ziffern, ist er der
+    ///   Tausenderpunkt: „1.234" sind 1234 Euro und nicht 1,234.
+    static func parse(_ text: String) -> Decimal? {
+        let kept = text.filter { $0.isASCIIDigit || $0 == "," || $0 == "." }
+        guard kept.contains(where: \.isASCIIDigit) else { return nil }
+
+        let separators = kept.enumerated().filter { $0.element == "," || $0.element == "." }
+        var splitAt = separators.last?.offset
+        let onlyDots = !separators.contains { $0.element == "," }
+        if let at = splitAt, onlyDots, separators.count == 1, kept.count - at - 1 == 3 {
+            splitAt = nil
+        }
+
+        let characters = Array(kept)
+        let whole: String
+        let fraction: String
+        if let at = splitAt {
+            whole = String(characters[..<at]).filter(\.isASCIIDigit)
+            fraction = String(characters[(at + 1)...]).filter(\.isASCIIDigit)
+        } else {
+            whole = kept.filter(\.isASCIIDigit)
+            fraction = ""
+        }
+
+        let digits = whole.isEmpty ? "0" : whole
+        let joined = fraction.isEmpty ? digits : "\(digits).\(fraction)"
+        // Fest auf POSIX: Die Zeichenkette ist an dieser Stelle normalisiert, das
+        // Trennzeichen der Systemsprache hat hier nichts mehr zu suchen.
+        return Decimal(string: joined, locale: Locale(identifier: "en_US_POSIX"))
+    }
+
     static func month(_ value: YearMonth) -> String {
         guard let date = firstDay(of: value) else { return "\(value.month)/\(value.year)" }
         return date.formatted(.dateTime.month(.wide).year())

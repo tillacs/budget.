@@ -5,9 +5,16 @@ iOS-App **budget.** Xcode-Projekt: `money..xcodeproj` — der Ordner-/Target-Nam
 
 Die App kann genau zwei Dinge, und das ist der Entwurf, nicht ein Zwischenstand:
 
-1. **Erfassen über Kurzbefehl.** `LogExpenseIntent` / `LogIncomeIntent` öffnen die App
-   direkt im Ziffernblock (`QuickEntrySheet`). Gedacht für „Auf Rückseite tippen →
-   Doppeltippen". Der `QuickEntryRouter` ist die Brücke vom Intent in die Oberfläche.
+1. **Erfassen über Kurzbefehl** — drei Aktionen, gedacht für „Auf Rückseite tippen →
+   Doppeltippen":
+   - `LogExpenseIntent` / `LogIncomeIntent` öffnen die App im Ziffernblock
+     (`QuickEntrySheet`). Der `QuickEntryRouter` ist die Brücke vom Intent in die
+     Oberfläche.
+   - `QuickLogIntent` bucht **ohne die App zu öffnen** und fragt Kategorie und Betrag
+     in zwei Systemeinblendungen ab. Zwei Fallstricke stecken dort als Kommentar im
+     Code: `AppEntity` lässt sich zur Laufzeit nicht auflösen (daher `CategoryOptions`
+     als Zeichenkettenliste), und der Zahlen-Resolver verschluckt Nachkommastellen
+     (daher Text-Parameter plus `MoneyFormat.parse`).
 2. **Eine einzige Seite** (`HomeScreen`): zwei Ringe (`FlowRings`, außen Ausgaben,
    innen Einnahmen, gemeinsamer Maßstab), die Summen, die Kategorienliste
    (`LedgerSection`) und darunter aufklappbar jede einzelne Buchung.
@@ -18,6 +25,10 @@ Schema 1 und ist bewusst entfernt worden. Kategorien legt der Nutzer selbst an.
 - UI-Texte und Code-Kommentare sind **deutsch**.
 - Quellcode in `money./` (`Core/`, `Persistence/`, `Intents/`, `Views/`),
   Tests in `money.Tests/`.
+- `AppStore.shared` ist der einzige Speicher: Oberfläche und Kurzbefehle greifen auf
+  dieselbe Instanz zu, sonst überschreiben sie sich gegenseitig die Datei.
+- Die App ist **deutsch lokalisiert** (`de.lproj`, `developmentRegion = de`). Ohne
+  das behandelt iOS sie als englisch.
 
 ## Git & GitHub — verbindlich
 

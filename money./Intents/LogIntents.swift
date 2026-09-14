@@ -52,6 +52,16 @@ struct BudgetAppShortcuts: AppShortcutsProvider {
             systemImageName: "arrow.down.left")
 
         AppShortcut(
+            intent: QuickLogIntent(),
+            phrases: [
+                "Buchung in \(.applicationName)",
+                "In \(.applicationName) erfassen",
+                "\(.applicationName) buchen",
+            ],
+            shortTitle: "Buchen",
+            systemImageName: "plus.circle")
+
+        AppShortcut(
             intent: LogIncomeIntent(),
             phrases: [
                 "Einnahme in \(.applicationName)",

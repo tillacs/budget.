@@ -187,9 +187,10 @@
 				};
 			};
 			buildConfigurationList = A178B4B13031088600835F79 /* Build configuration list for PBXProject "money." */;
-			developmentRegion = en;
+			developmentRegion = de;
 			hasScannedForEncodings = 0;
 			knownRegions = (
+				de,
 				en,
 				Base,
 			);

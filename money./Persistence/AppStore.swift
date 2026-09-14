@@ -154,6 +154,14 @@ final class AppStore {
 }
 
 extension AppStore {
+    /// Ein Speicher für die ganze App.
+    ///
+    /// Die Oberfläche und die Kurzbefehle greifen auf dieselbe Instanz zu. Ein
+    /// Kurzbefehl, der im Hintergrund bucht, läuft im selben Prozess wie die Seite im
+    /// Vordergrund — zwei getrennte Speicher würden sich gegenseitig überschreiben,
+    /// und zwar genau dann, wenn beide dieselbe Datei für sich beanspruchen.
+    static let shared = AppStore.loadFromDisk()
+
     /// Für Previews und den Simulator, ohne die echte Datei anzufassen.
     static var preview: AppStore {
         AppStore(data: SampleData.make(), file: DataFile(

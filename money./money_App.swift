@@ -9,7 +9,7 @@ import SwiftUI
 
 @main
 struct money_App: App {
-    @State private var store = AppStore.loadFromDisk()
+    @State private var store = AppStore.shared
 
     /// Startanimation der Wortmarke — läuft einmal pro Kaltstart.
     @State private var showLaunch = true
