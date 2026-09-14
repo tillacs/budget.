@@ -1,17 +1,14 @@
-// SettingsSheet.swift
-// budget. — Kategorien und die Einrichtung des Doppeltipps
+// CategoriesPage.swift
+// budget. — die zweite Seite, einen Wisch nach links
 //
-// Das einzige, was hinter der einen Seite liegt. Es ist nichts, was man im Alltag
-// braucht: die Kategorien gehören hierher, weil man sie einmal anlegt, und die
-// Anleitung, weil man den Doppeltipp genau einmal einrichtet.
+// Oben die Kategorien, weil man die gelegentlich anfasst. Unten die Einrichtung des
+// Doppeltipps, weil man die genau einmal braucht und danach nie wieder.
 
 import SwiftUI
 import UIKit
 
-struct SettingsSheet: View {
+struct CategoriesPage: View {
     let store: AppStore
-
-    @Environment(\.dismiss) private var dismiss
 
     @State private var editingCategory: BudgetCategory?
     @State private var newCategoryDirection: Direction?
@@ -23,26 +20,24 @@ struct SettingsSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                backTapSection
-                actionsSection
                 categorySection(.expense)
                 categorySection(.income)
+                actionsSection
+                backTapSection
+                walletSection
                 dataSection
             }
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
             .background(Palette.canvas)
             .environment(\.editMode, .constant(isSorting ? .active : .inactive))
-            .navigationTitle("Einrichten")
+            .navigationTitle("Kategorien")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button(isSorting ? "Fertig" : "Sortieren") {
                         withAnimation { isSorting.toggle() }
                     }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Schließen") { dismiss() }.fontWeight(.semibold)
                 }
             }
         }
@@ -110,8 +105,42 @@ struct SettingsSheet: View {
             actionRow(
                 "Einnahme erfassen",
                 "Dasselbe für Einnahmen — passt gut auf den Dreifachtipp.")
+            actionRow(
+                "Buchung vorschlagen",
+                "Bekommt einen Text, liest Betrag und Händler heraus und fragt nach, "
+                    + "bevor sie bucht. Für Automationen gedacht — siehe unten.")
         } header: {
-            Text("Die drei Aktionen")
+            Text("Die vier Aktionen")
+        } footer: {
+            Text("Beim Erfassen darf hinter dem Betrag eine Notiz stehen: "
+                + "\u{201E}12,50 Bäcker\u{201C} bucht 12,50 € mit der Notiz Bäcker. "
+                + "budget. merkt sich, welche Kategorie zu \u{201E}Bäcker\u{201C} gehört.")
+        }
+    }
+
+    /// Der einzige Auslöser, den iOS für Zahlungen hergibt.
+    ///
+    /// Mitteilungen anderer Apps kann keine App lesen — es gibt dafür weder eine
+    /// Schnittstelle noch einen Automations-Auslöser. Was von Trade Republic oder
+    /// PayPal als Push kommt, bleibt deshalb außen vor. Läuft die Zahlung dagegen über
+    /// Apple Pay, greift der Wallet-Auslöser.
+    private var walletSection: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 14) {
+                step(1, "Kurzbefehle → Automation → Neue Automation → Wallet, "
+                    + "dann die Karte auswählen.")
+                step(2, "\u{201E}Nach Bestätigung ausführen\u{201C} wählen — so kommt ein "
+                    + "Vorschlag statt einer stillen Buchung.")
+                step(3, "Als Aktion \u{201E}Buchung vorschlagen\u{201C} aus budget. wählen.")
+            }
+            .padding(.vertical, 6)
+            .listRowBackground(Palette.card)
+        } header: {
+            Text("Automatisch bei Apple Pay")
+        } footer: {
+            Text("Nach jeder Zahlung mit dieser Karte fragt das iPhone, ob budget. sie "
+                + "buchen soll. Push-Mitteilungen von Banking-Apps kann unter iOS keine "
+                + "App lesen — nur Zahlungen über Apple Pay lösen etwas aus.")
         }
     }
 
@@ -193,6 +222,6 @@ struct SettingsSheet: View {
     }
 }
 
-#Preview("Einrichten") {
-    SettingsSheet(store: .preview)
+#Preview("Kategorien") {
+    CategoriesPage(store: .preview)
 }

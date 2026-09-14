@@ -78,6 +78,48 @@ nonisolated enum MoneyFormat {
         return Decimal(string: joined, locale: Locale(identifier: "en_US_POSIX"))
     }
 
+    /// Einen getippten Eintrag in Betrag und Notiz zerlegen: „12,50 Bäcker" ist beides.
+    ///
+    /// So braucht die Schnellerfassung über den Kurzbefehl keine dritte Einblendung für
+    /// die Notiz — wer eine will, hängt sie einfach hinten an, wer keine will, merkt
+    /// nichts davon.
+    static func amountAndNote(_ text: String) -> (amount: Decimal, note: String)? {
+        let pattern = "^\\s*[-+]?\\s*(?:€|EUR)?\\s*([0-9][0-9.,]*)\\s*(?:€|EUR)?\\s*(.*)$"
+        guard let expression = try? NSRegularExpression(
+                  pattern: pattern, options: [.caseInsensitive]),
+              let match = expression.firstMatch(
+                  in: text, range: NSRange(text.startIndex..., in: text)),
+              let numberRange = Range(match.range(at: 1), in: text),
+              let amount = parse(String(text[numberRange]))
+        else { return nil }
+
+        let note = Range(match.range(at: 2), in: text)
+            .map { String(text[$0]).trimmingCharacters(in: .whitespacesAndNewlines) } ?? ""
+        return (amount, note)
+    }
+
+    /// Den Betrag aus einem Fließtext ziehen — etwa aus einer Zahlungsmail.
+    ///
+    /// Gesucht wird ausschließlich **neben einem Währungszeichen**. Das ist eine harte
+    /// Einschränkung mit Absicht: Ohne sie liest „Bestellung vom 03.09." sich als 3,09 €,
+    /// und ein falsch geratener Betrag ist schlimmer als eine Rückfrage. Findet sich
+    /// keiner, gibt diese Funktion nichts zurück und der Aufrufer fragt nach.
+    static func firstAmount(in text: String) -> Decimal? {
+        // „12,50 €" und „€ 12,50" / „EUR 12,50" — beide Seiten, beide Schreibweisen.
+        let pattern = "(?:€|EUR)\\s*([0-9][0-9.,]*)|([0-9][0-9.,]*)\\s*(?:€|EUR)"
+        guard let expression = try? NSRegularExpression(
+            pattern: pattern, options: [.caseInsensitive]) else { return nil }
+
+        let range = NSRange(text.startIndex..., in: text)
+        for match in expression.matches(in: text, range: range) {
+            for group in 1..<match.numberOfRanges {
+                guard let found = Range(match.range(at: group), in: text) else { continue }
+                if let amount = parse(String(text[found])), amount > 0 { return amount }
+            }
+        }
+        return nil
+    }
+
     static func month(_ value: YearMonth) -> String {
         guard let date = firstDay(of: value) else { return "\(value.month)/\(value.year)" }
         return date.formatted(.dateTime.month(.wide).year())

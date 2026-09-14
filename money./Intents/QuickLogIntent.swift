@@ -56,13 +56,14 @@ struct QuickLogIntent: AppIntent {
 
         // Ein leeres oder unlesbares Feld gilt als „nicht gesetzt" und wird abgefragt —
         // auch dann, wenn ein bestehender Kurzbefehl dort noch etwas anderes stehen hat.
-        let given = amount.flatMap(QuickLogIntent.normalized) ?? 0
-        let value = if given > 0 {
-            given
+        let typed = if let amount, let given = QuickLogIntent.normalized(amount), given > 0 {
+            amount
         } else {
-            QuickLogIntent.normalized(
-                try await $amount.requestValue(IntentDialog("Wie viel? (€)"))) ?? 0
+            try await $amount.requestValue(IntentDialog("Wie viel? (€, optional mit Notiz)"))
         }
+
+        // Betrag und Notiz stecken in derselben Zeile: „12,50 Bäcker".
+        let (value, note) = QuickLogIntent.split(typed)
         guard value > 0 else { throw QuickLogError.zeroAmount }
 
         // Die Kategorie kann zwischen Auswahl und Ausführung gelöscht worden sein —
@@ -72,10 +73,23 @@ struct QuickLogIntent: AppIntent {
         }
 
         store.add(Entry(
-            amount: value, direction: stored.direction, categoryID: stored.id))
+            amount: value, direction: stored.direction, categoryID: stored.id, note: note))
 
         return .result(dialog: IntentDialog(
             "\(MoneyFormat.amount(value)) für \(stored.name) gesichert."))
+    }
+
+    /// Zerlegt die Eingabe in Betrag und Notiz und rundet den Betrag.
+    static func split(_ text: String) -> (Decimal, String) {
+        guard let parts = MoneyFormat.amountAndNote(text) else { return (0, "") }
+        return (rounded(parts.amount), parts.note)
+    }
+
+    private static func rounded(_ value: Decimal) -> Decimal {
+        var input = abs(value)
+        var result = Decimal()
+        NSDecimalRound(&result, &input, 2, .plain)
+        return result
     }
 
     /// Vom getippten Text auf einen exakten Betrag: Vorzeichen weg, zwei Stellen.

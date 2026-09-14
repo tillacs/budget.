@@ -147,3 +147,64 @@ struct QuickEntryRouterTests {
         #expect(router.consume() == nil)
     }
 }
+
+@MainActor
+struct MerchantMemoryTests {
+    private func store() -> AppStore {
+        AppStore(data: .seeded(), file: DataFile(
+            fileURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("budget-merchant-\(UUID().uuidString).json")))
+    }
+
+    /// Der Kern der Automation: Was einmal bestätigt wurde, wird nicht neu gefragt.
+    @Test func merktSichDieKategorieEinesHändlers() throws {
+        let store = store()
+        let lebensmittel = try #require(store.data.categories.first { $0.name == "Lebensmittel" })
+
+        store.add(
+            Entry(amount: 12, direction: .expense, categoryID: lebensmittel.id),
+            merchant: "REWE")
+
+        #expect(store.rememberedCategory(forMerchant: "rewe")?.id == lebensmittel.id)
+        #expect(store.rememberedCategory(forMerchant: " REWE ")?.id == lebensmittel.id)
+        #expect(store.rememberedCategory(forMerchant: "Aldi") == nil)
+    }
+
+    /// Auch die Notiz einer von Hand erfassten Buchung ist eine Aussage über den Händler.
+    @Test func lerntAuchAusDerNotiz() throws {
+        let store = store()
+        let essen = try #require(store.data.categories.first { $0.name == "Essen" })
+
+        store.add(Entry(amount: 8, direction: .expense, categoryID: essen.id, note: "Bäckerei"))
+        #expect(store.rememberedCategory(forMerchant: "bäckerei")?.id == essen.id)
+    }
+
+    /// Eine Zuordnung auf eine gelöschte Kategorie würde stumm ins Leere zeigen.
+    @Test func vergisstGelöschteKategorien() throws {
+        let store = store()
+        let abos = try #require(store.data.categories.first { $0.name == "Abos" })
+
+        store.add(Entry(amount: 12, direction: .expense, categoryID: abos.id), merchant: "Netflix")
+        store.deleteCategory(abos.id)
+
+        #expect(store.rememberedCategory(forMerchant: "Netflix") == nil)
+        #expect(store.data.merchantCategories.isEmpty)
+    }
+
+    /// Ein neues Feld darf keine bestehende Datei unlesbar machen — sonst stünde der
+    /// Nutzer beim nächsten Update vor einer leeren App.
+    @Test func liestEineDateiOhneDasNeueFeld() throws {
+        let file = DataFile(fileURL: FileManager.default.temporaryDirectory
+            .appendingPathComponent("budget-alt-\(UUID().uuidString).json"))
+        defer { try? file.delete() }
+
+        try FileManager.default.createDirectory(
+            at: file.fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let alt = #"{"schemaVersion":2,"entries":[],"categories":[],"lastUsed":{}}"#
+        try Data(alt.utf8).write(to: file.fileURL)
+
+        let loaded = try #require(try file.load())
+        #expect(loaded.merchantCategories.isEmpty)
+        #expect(loaded.schemaVersion == 2)
+    }
+}

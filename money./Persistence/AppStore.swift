@@ -15,6 +15,12 @@ final class AppStore {
 
     var saveErrorMessage: String?
 
+    /// Die zuletzt gesicherte Buchung, mit einem Zähler daneben. Die Oberfläche hängt
+    /// ihre Bestätigungsanimation daran — der Zähler, damit zweimal derselbe Betrag
+    /// auch zweimal animiert.
+    private(set) var lastSaved: Entry?
+    private(set) var saveTick = 0
+
     private let file: DataFile
 
     init(data: AppData, file: DataFile = .applicationDefault) {
@@ -53,16 +59,35 @@ final class AppStore {
 
     // MARK: - Buchungen
 
-    func add(_ entry: Entry) {
+    func add(_ entry: Entry, merchant: String? = nil) {
         data.entries.append(entry)
         data.lastUsed[entry.direction.rawValue] = entry.categoryID
+        learn(merchant ?? entry.note, as: entry.categoryID)
+        mark(entry)
         persist()
+    }
+
+    /// Merkt sich, welche Kategorie zu einem Händler gehört.
+    ///
+    /// Gelernt wird auch aus der Notiz einer von Hand erfassten Buchung: Wer „REWE" in
+    /// die Notiz tippt und Lebensmittel wählt, hat damit dieselbe Aussage getroffen wie
+    /// der Vorschlag aus einer Zahlungsmail. Falsch liegen kann die Tabelle nicht
+    /// folgenschwer — sie schlägt nur vor, gebucht wird erst nach Bestätigung.
+    func learn(_ merchant: String?, as category: UUID) {
+        guard let merchant, let key = MerchantKey.normalized(merchant) else { return }
+        data.merchantCategories[key] = category
+    }
+
+    func rememberedCategory(forMerchant merchant: String) -> BudgetCategory? {
+        data.rememberedCategory(forMerchant: merchant)
     }
 
     func update(_ entry: Entry) {
         guard let index = data.entries.firstIndex(where: { $0.id == entry.id }) else { return }
         data.entries[index] = entry
         data.lastUsed[entry.direction.rawValue] = entry.categoryID
+        learn(entry.note, as: entry.categoryID)
+        mark(entry)
         persist()
     }
 
@@ -114,6 +139,8 @@ final class AppStore {
         for (direction, used) in data.lastUsed where used == id {
             data.lastUsed[direction] = nil
         }
+        // Eine Zuordnung auf eine gelöschte Kategorie würde stumm ins Leere zeigen.
+        data.merchantCategories = data.merchantCategories.filter { $0.value != id }
         persist()
     }
 
@@ -142,6 +169,11 @@ final class AppStore {
     }
 
     // MARK: - Intern
+
+    private func mark(_ entry: Entry) {
+        lastSaved = entry
+        saveTick += 1
+    }
 
     private func persist() {
         revision += 1
