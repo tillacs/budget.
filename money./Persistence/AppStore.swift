@@ -1,3 +1,6 @@
+// AppStore.swift
+// budget. — der einzige veränderliche Zustand der App
+
 import Foundation
 import Observation
 
@@ -6,30 +9,26 @@ import Observation
 final class AppStore {
     private(set) var data: AppData
 
-    /// Rebuilt whenever the data changes rather than on every render — training the
-    /// classifier is the one thing here that is not free.
-    private(set) var categorizer: Categorizer
+    /// Steigt bei jeder Änderung. Die Oberfläche hängt ihre Haptik daran, statt an
+    /// jeder einzelnen Mutation.
+    private(set) var revision = 0
 
-    var lastImport: ImportSummary?
-    /// Rows the last import could not read. Everything else still came in.
-    var lastFailures: [RowFailure] = []
-    var importErrorMessage: String?
-    var isImporting = false
+    var saveErrorMessage: String?
 
     private let file: DataFile
 
     init(data: AppData, file: DataFile = .applicationDefault) {
         self.data = data
         self.file = file
-        self.categorizer = AppStore.makeCategorizer(from: data)
     }
 
     static func loadFromDisk(file: DataFile = .applicationDefault) -> AppStore {
         do {
             if let stored = try file.load() { return AppStore(data: stored, file: file) }
         } catch {
-            // A corrupt file must not brick the app. The CSV can rebuild everything except
-            // the user's own rules and budgets, so start clean rather than crash-looping.
+            // Eine unlesbare Datei darf die App nicht blockieren. Das gilt auch für die
+            // alte Import-Datei aus Schema 1: Sie enthält nichts, was sich in Buchungen
+            // übersetzen ließe, also wird sie verworfen statt migriert.
             try? file.delete()
         }
         let store = AppStore(data: .seeded(), file: file)
@@ -37,183 +36,128 @@ final class AppStore {
         return store
     }
 
-    // MARK: Import
+    // MARK: - Auswertung
 
-    func importTransactions(from url: URL) async {
-        isImporting = true
-        importErrorMessage = nil
-        lastFailures = []
-        defer { isImporting = false }
-
-        do {
-            let text = try DataFile.readText(at: url)
-            // A full history export is large enough that parsing it on the main actor would
-            // be felt.
-            let parsed = try await Task.detached(priority: .userInitiated) {
-                try TransactionCSVParser.parse(text)
-            }.value
-
-            merge(parsed.transactions)
-            lastFailures = parsed.failures
-        } catch {
-            importErrorMessage = (error as? LocalizedError)?.errorDescription
-                ?? error.localizedDescription
-        }
+    func summary(for month: YearMonth) -> MonthSummary {
+        MonthSummary.make(month: month, entries: data.entries, categories: data.categories)
     }
 
-    // MARK: Mutations
+    func entries(of category: UUID, in month: YearMonth) -> [Entry] {
+        data.entries.of(category: category, in: month)
+    }
 
-    func setSort(_ sort: BudgetSort) {
-        data.sort = sort
+    /// Monate, in denen etwas steht — plus der laufende, damit man immer irgendwo steht.
+    func recordedMonths(including month: YearMonth) -> Set<YearMonth> {
+        data.entries.recordedMonths.union([month, .current()])
+    }
+
+    // MARK: - Buchungen
+
+    func add(_ entry: Entry) {
+        data.entries.append(entry)
+        data.lastUsed[entry.direction.rawValue] = entry.categoryID
         persist()
     }
 
-    /// The merge step on its own, without the file. Reading a CSV is one way to get here;
-    /// it is not the only way worth testing.
-    func merge(_ incoming: [Transaction]) {
-        let (merged, summary) = TransactionImporter.merge(
-            existing: data.transactions, incoming: incoming)
-        data.transactions = merged
-        rebuild()
-        persist()
-        lastImport = summary
-    }
-
-    var inboxGroups: [InboxGroup] {
-        InboxBuilder.groups(transactions: data.transactions, categorizer: categorizer)
-    }
-
-    /// One tap in the Inbox. Writing the rule is the point — it is what stops the same shop
-    /// from asking again.
-    ///
-    /// A rule derived from one booking does not always match every sibling in the group
-    /// (their merchant text can differ in punctuation, or one row may carry no MCC). Those
-    /// leftovers get a direct assignment, so the group the user just answered really does
-    /// disappear rather than half-disappear.
-    func categorize(_ group: InboxGroup, as categoryID: BudgetCategory.ID, writing rule: Rule?) {
-        if let rule {
-            data.rules.append(rule)
-            let withRule = Categorizer(rules: data.rules, overrides: data.overrides)
-            for transaction in group.transactions
-            where withRule.assignment(for: transaction).categoryID != categoryID {
-                data.overrides[transaction.id] = categoryID
-            }
-        } else {
-            for transaction in group.transactions {
-                data.overrides[transaction.id] = categoryID
-            }
-        }
-        rebuild()
+    func update(_ entry: Entry) {
+        guard let index = data.entries.firstIndex(where: { $0.id == entry.id }) else { return }
+        data.entries[index] = entry
+        data.lastUsed[entry.direction.rawValue] = entry.categoryID
         persist()
     }
 
-    /// A template arrives complete: category, its rules, and a starting budget the user can
-    /// change immediately.
-    @discardableResult
-    func addCategory(from template: CategoryTemplate) -> BudgetCategory {
-        let category = addCategory(name: template.name, kind: template.kind)
-        data.rules.append(contentsOf: CategoryTemplates.rules(for: template, categoryID: category.id))
-        if let budget = template.suggestedBudget { data.budgets[category.id] = budget }
-        rebuild()
-        persist()
-        return category
-    }
-
-    func setKind(_ kind: CategoryKind, for id: BudgetCategory.ID) {
-        guard let index = data.categories.firstIndex(where: { $0.id == id }) else { return }
-        data.categories[index].kind = kind
+    func deleteEntry(_ id: UUID) {
+        data.entries.removeAll { $0.id == id }
         persist()
     }
 
-    func renameCategory(_ id: BudgetCategory.ID, to name: String) {
-        guard let index = data.categories.firstIndex(where: { $0.id == id }) else { return }
-        data.categories[index].name = name.trimmingCharacters(in: .whitespaces)
-        persist()
-    }
-
-    /// Deleting a category takes its rules and assignments with it, which sends its bookings
-    /// back to the Inbox rather than leaving them pointing at something that no longer exists.
-    func deleteCategory(_ id: BudgetCategory.ID) {
-        data.categories.removeAll { $0.id == id }
-        data.rules.removeAll { $0.categoryID == id }
-        data.overrides = data.overrides.filter { $0.value != id }
-        data.budgets[id] = nil
-        rebuild()
-        persist()
-    }
-
-    func moveCategory(_ id: BudgetCategory.ID, toIndex index: Int) {
-        guard let current = data.categories.firstIndex(where: { $0.id == id }) else { return }
-        let category = data.categories.remove(at: current)
-        data.categories.insert(category, at: min(max(0, index), data.categories.count))
-        for position in data.categories.indices { data.categories[position].sortIndex = position }
-        persist()
-    }
+    // MARK: - Kategorien
 
     @discardableResult
-    func addCategory(name: String, kind: CategoryKind) -> BudgetCategory {
+    func addCategory(
+        name: String, symbol: String, tint: CategoryTint, direction: Direction
+    ) -> BudgetCategory {
         let category = BudgetCategory(
-            name: name.trimmingCharacters(in: .whitespaces),
-            kind: kind,
+            name: name.trimmingCharacters(in: .whitespacesAndNewlines),
+            symbol: symbol.isEmpty ? "•" : symbol,
+            tint: tint,
+            direction: direction,
             sortIndex: (data.categories.map(\.sortIndex).max() ?? -1) + 1)
         data.categories.append(category)
         persist()
         return category
     }
 
-    func deleteRule(_ id: Rule.ID) {
-        data.rules.removeAll { $0.id == id }
-        rebuild()
+    func updateCategory(_ category: BudgetCategory) {
+        guard let index = data.categories.firstIndex(where: { $0.id == category.id })
+        else { return }
+
+        var updated = category
+        updated.name = category.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if updated.symbol.isEmpty { updated.symbol = "•" }
+        data.categories[index] = updated
+
+        // Wird die Richtung gedreht, ziehen die Buchungen mit. Alles andere würde die
+        // Kategorie aus ihrem eigenen Ring werfen und die Beträge unauffindbar machen.
+        for position in data.entries.indices where data.entries[position].categoryID == updated.id {
+            data.entries[position].direction = updated.direction
+        }
         persist()
     }
 
-    func setBudget(_ amount: Decimal, for category: BudgetCategory.ID) {
-        if amount > 0 { data.budgets[category] = amount } else { data.budgets[category] = nil }
+    /// Löschen nimmt die Buchungen der Kategorie mit. Sie ohne Kategorie stehen zu
+    /// lassen hieße, Beträge zu behalten, die in keinem Ring mehr auftauchen — genau
+    /// die Art von unsichtbarem Rest, den diese App nicht haben soll.
+    func deleteCategory(_ id: UUID) {
+        data.categories.removeAll { $0.id == id }
+        data.entries.removeAll { $0.categoryID == id }
+        for (direction, used) in data.lastUsed where used == id {
+            data.lastUsed[direction] = nil
+        }
         persist()
     }
 
-    /// Wipes everything, including rules and budgets, and reseeds the defaults.
+    func moveCategories(for direction: Direction, from source: IndexSet, to destination: Int) {
+        var ordered = data.categories(for: direction)
+
+        // Von Hand statt über SwiftUIs `move(fromOffsets:toOffset:)` — der Speicher
+        // kennt die Oberfläche nicht und soll sie auch nicht importieren müssen.
+        let moving = source.sorted().map { ordered[$0] }
+        for index in source.sorted(by: >) { ordered.remove(at: index) }
+        let offset = source.filter { $0 < destination }.count
+        ordered.insert(contentsOf: moving, at: min(max(0, destination - offset), ordered.count))
+
+        // Die Reihenfolgen beider Richtungen werden getrennt vergeben, sonst würde das
+        // Sortieren der Ausgaben die Einnahmen durcheinanderbringen.
+        let others = data.categories.filter { $0.direction != direction }
+        for position in ordered.indices { ordered[position].sortIndex = position }
+        data.categories = ordered + others
+        persist()
+    }
+
     func resetAllData() {
         try? file.delete()
-        data = AppData.seeded()
-        rebuild()
+        data = .seeded()
         persist()
-        lastImport = nil
-        importErrorMessage = nil
     }
 
-    // MARK: Internals
-
-    private func rebuild() {
-        categorizer = AppStore.makeCategorizer(from: data)
-    }
+    // MARK: - Intern
 
     private func persist() {
+        revision += 1
         do {
             try file.save(data)
         } catch {
-            importErrorMessage = "Speichern fehlgeschlagen: \(error.localizedDescription)"
+            saveErrorMessage = "Speichern fehlgeschlagen: \(error.localizedDescription)"
         }
-    }
-
-    private static func makeCategorizer(from data: AppData) -> Categorizer {
-        let examples = Categorizer.trainingExamples(
-            transactions: data.transactions, rules: data.rules, overrides: data.overrides)
-        return Categorizer(
-            rules: data.rules,
-            overrides: data.overrides,
-            classifier: LearnedClassifier(examples: examples))
     }
 }
 
 extension AppStore {
-    /// Previews and the simulator, without touching the real container.
+    /// Für Previews und den Simulator, ohne die echte Datei anzufassen.
     static var preview: AppStore {
-        let sample = SampleData.bundle
-        return AppStore(data: AppData(
-            transactions: sample.transactions,
-            categories: sample.categories,
-            rules: sample.rules,
-            budgets: sample.budgets))
+        AppStore(data: SampleData.make(), file: DataFile(
+            fileURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("budget-preview-\(UUID().uuidString).json")))
     }
 }

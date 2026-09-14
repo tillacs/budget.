@@ -15,6 +15,26 @@ nonisolated enum MoneyFormat {
         value.formatted(.number.precision(.fractionLength(0...2)).grouping(.never))
     }
 
+    /// Die große Zahl. Ab vierstellig sind Cent Rauschen — darunter sind sie die
+    /// Hälfte der Aussage, und „42 €" für 42,50 € wäre schlicht falsch.
+    static func hero(_ value: Decimal, code: String = "EUR") -> String {
+        abs(value) >= 1000 ? rounded(value, code: code) : amount(value, code: code)
+    }
+
+    /// Mit Vorzeichen, für die Ringmitte. Das Plus muss dastehen — ohne es liest
+    /// sich ein Überschuss wie ein Betrag ohne Aussage.
+    static func signed(_ value: Decimal, code: String = "EUR") -> String {
+        let magnitude = hero(abs(value), code: code)
+        if value > 0 { return "+" + magnitude }
+        if value < 0 { return "−" + magnitude }
+        return magnitude
+    }
+
+    /// Anteil am Ring, wie in der Liste unter der Grafik.
+    static func share(_ value: Double) -> String {
+        value.formatted(.percent.precision(.fractionLength(value < 0.1 ? 1 : 0)))
+    }
+
     static func month(_ value: YearMonth) -> String {
         guard let date = firstDay(of: value) else { return "\(value.month)/\(value.year)" }
         return date.formatted(.dateTime.month(.wide).year())

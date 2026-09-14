@@ -1,97 +1,139 @@
+// CategoryEditorSheet.swift
+// budget. — eine Kategorie anlegen oder ändern
+//
+// Name, Zeichen, Farbe, Seite. Mehr kann eine Kategorie in dieser App nicht sein,
+// und das ist Absicht: Jede weitere Einstellung wäre eine Entscheidung, die man
+// beim Erfassen wieder nachschlagen müsste.
+
 import SwiftUI
 
-/// Creates or edits one category. Templates are a shortcut, never a constraint — a template
-/// only prefills the name, the rules and a starting amount, all of which stay editable.
 struct CategoryEditorSheet: View {
     let store: AppStore
-    /// `nil` creates a new one.
-    let category: BudgetCategory?
-    var defaultKind: CategoryKind = .spending
+    let editing: BudgetCategory?
+    var direction: Direction = .expense
+    var onSave: ((BudgetCategory) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
 
     @State private var name = ""
-    @State private var kind: CategoryKind = .spending
-    @State private var amount = ""
-    @State private var pickedTemplate: CategoryTemplate?
+    @State private var symbol = "💫"
+    @State private var tint: CategoryTint = .azure
+    @State private var currentDirection: Direction = .expense
     @State private var showsDeleteConfirmation = false
-    @State private var loaded = false
-    @State private var saved = false
-
-    private var isNew: Bool { category == nil }
-
-    private var parsedAmount: Decimal? {
-        let normalized = amount
-            .replacingOccurrences(of: ".", with: "")
-            .replacingOccurrences(of: ",", with: ".")
-            .trimmingCharacters(in: .whitespaces)
-        guard !normalized.isEmpty else { return nil }
-        return TransactionCSVParser.decimal(from: normalized)
-    }
+    @State private var prepared = false
+    @FocusState private var nameFocused: Bool
 
     private var canSave: Bool {
-        !name.trimmingCharacters(in: .whitespaces).isEmpty
+        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
+
+    /// Ein Vorrat gängiger Zeichen. Wer ein anderes will, tippt es in das Feld neben
+    /// dem Namen — die Emoji-Tastatur ist der einzige Symbolwähler, den jeder kennt.
+    private let suggestions = [
+        "🍽️", "🛒", "🏠", "🚆", "⛽️", "🎧", "🎉", "🧾", "💊", "👕",
+        "✈️", "📱", "🔁", "🐾", "🎁", "📚", "🏋️", "☕️", "🍺", "🚕",
+        "💼", "💰", "📈", "🎓", "🧰", "✨", "💫", "🧩",
+    ]
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: Metrics.sectionGap) {
-                    if isNew { templateSection }
-                    detailsSection
-                    if !isNew { deleteSection }
+                VStack(spacing: 26) {
+                    preview
+                    nameField
+                    symbolGrid
+                    tintRow
+                    directionRow
+                    if editing != nil { deleteButton }
                 }
                 .padding(.horizontal, Metrics.screenInset)
-                .padding(.top, 8)
-                .padding(.bottom, 40)
+                .padding(.vertical, 18)
             }
             .background(Palette.canvas)
-            .navigationTitle(isNew ? "Neu" : "Bearbeiten")
+            .scrollDismissesKeyboard(.interactively)
+            .navigationTitle(editing == nil ? "Neue Kategorie" : "Kategorie")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .cancellationAction) {
                     Button("Abbrechen") { dismiss() }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Sichern") { save() }
-                        .fontWeight(.semibold)
-                        .disabled(!canSave)
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Sichern", action: save).disabled(!canSave).fontWeight(.semibold)
                 }
             }
-            .sensoryFeedback(.success, trigger: saved)
         }
         .tint(Palette.accent)
-        .onAppear(perform: load)
+        .presentationDetents([.large])
+        .task { prepare() }
+        .confirmationDialog(
+            "\u{201E}\(name)\u{201C} mit allen Buchungen löschen?",
+            isPresented: $showsDeleteConfirmation, titleVisibility: .visible
+        ) {
+            Button("Löschen", role: .destructive) {
+                if let editing { store.deleteCategory(editing.id) }
+                dismiss()
+            }
+        } message: {
+            Text("Die Buchungen dieser Kategorie verschwinden mit ihr. Das lässt sich nicht rückgängig machen.")
+        }
     }
 
-    // MARK: Sections
+    // MARK: - Teile
 
-    private var templateSection: some View {
+    private var preview: some View {
+        VStack(spacing: 10) {
+            CategoryBadge(
+                category: BudgetCategory(name: name, symbol: symbol, tint: tint, direction: currentDirection),
+                side: 76)
+            Text(name.isEmpty ? "Ohne Namen" : name)
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(name.isEmpty ? Palette.faint : Palette.ink)
+        }
+        .padding(.top, 6)
+    }
+
+    private var nameField: some View {
+        HStack(spacing: 10) {
+            TextField("Zeichen", text: $symbol)
+                .font(.system(size: 22))
+                .multilineTextAlignment(.center)
+                .frame(width: 52, height: 48)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Palette.raised))
+                .onChange(of: symbol) { _, new in
+                    // Ein Zeichen genügt — und es muss nicht zwingend ein Emoji sein.
+                    if let first = new.first { symbol = String(first) }
+                }
+
+            TextField("Name", text: $name)
+                .font(.body)
+                .focused($nameFocused)
+                .submitLabel(.done)
+                .padding(.horizontal, 14)
+                .frame(height: 48)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Palette.raised))
+        }
+    }
+
+    private var symbolGrid: some View {
         VStack(alignment: .leading, spacing: 10) {
-            SectionHeader(title: "Vorlage", detail: "optional")
-            CardStack {
-                let templates = CategoryTemplates.templates(for: kind)
-                ForEach(Array(templates.enumerated()), id: \.element.id) { index, template in
-                    if index > 0 { RowDivider() }
-                    Button { apply(template) } label: {
-                        HStack(spacing: 12) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(template.name)
-                                    .font(.subheadline.weight(.medium))
-                                    .foregroundStyle(Palette.ink)
-                                Text(describe(template))
-                                    .font(.caption)
-                                    .foregroundStyle(Palette.muted)
-                                    .lineLimit(1)
-                            }
-                            Spacer(minLength: 8)
-                            if pickedTemplate == template {
-                                Image(systemName: "checkmark")
-                                    .font(.footnote.weight(.semibold))
-                                    .foregroundStyle(Palette.accent)
-                            }
-                        }
-                        .padding(Metrics.cardPadding)
+            label("Zeichen")
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 7), spacing: 8
+            ) {
+                ForEach(suggestions, id: \.self) { candidate in
+                    Button { symbol = candidate } label: {
+                        Text(candidate)
+                            .font(.system(size: 20))
+                            .frame(maxWidth: .infinity, minHeight: 42)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(symbol == candidate ? Palette.card : Palette.raised))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .strokeBorder(
+                                        symbol == candidate ? Palette.ink : .clear, lineWidth: 1.5))
                     }
                     .buttonStyle(PressableRowStyle())
                 }
@@ -99,143 +141,127 @@ struct CategoryEditorSheet: View {
         }
     }
 
-    private func describe(_ template: CategoryTemplate) -> String {
-        var parts: [String] = []
-        if !template.mccCodes.isEmpty {
-            parts.append(template.mccCodes.count == 1
-                         ? "1 MCC-Regel"
-                         : "\(template.mccCodes.count) MCC-Regeln")
-        }
-        if !template.patterns.isEmpty {
-            parts.append(template.patterns.prefix(3).joined(separator: ", "))
-        }
-        if parts.isEmpty { parts.append("keine Regeln") }
-        return parts.joined(separator: " · ")
-    }
-
-    private var detailsSection: some View {
+    private var tintRow: some View {
         VStack(alignment: .leading, spacing: 10) {
-            SectionHeader(title: "Details")
-            CardStack {
-                HStack {
-                    Text("Name").font(.subheadline).foregroundStyle(Palette.muted)
-                    Spacer(minLength: 12)
-                    TextField("z. B. Lebensmittel", text: $name)
-                        .multilineTextAlignment(.trailing)
-                        .font(.subheadline.weight(.medium))
-                }
-                .padding(Metrics.cardPadding)
-
-                RowDivider()
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Art").font(.subheadline).foregroundStyle(Palette.muted)
-                    Picker("Art", selection: $kind) {
-                        Text("Ausgabe").tag(CategoryKind.spending)
-                        Text("Laufend").tag(CategoryKind.fixed)
-                        Text("Einnahme").tag(CategoryKind.income)
+            label("Farbe")
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 6), spacing: 10
+            ) {
+                ForEach(CategoryTint.all, id: \.rawValue) { candidate in
+                    Button { tint = candidate } label: {
+                        Circle()
+                            .fill(Palette.tint(candidate))
+                            .frame(height: 38)
+                            .overlay {
+                                if tint == candidate {
+                                    Circle()
+                                        .strokeBorder(Palette.canvas, lineWidth: 3)
+                                        .padding(2)
+                                }
+                            }
+                            .overlay {
+                                if tint == candidate {
+                                    Circle().strokeBorder(Palette.ink, lineWidth: 1.5)
+                                }
+                            }
                     }
-                    .pickerStyle(.segmented)
-                }
-                .padding(Metrics.cardPadding)
-
-                if kind != .income {
-                    RowDivider()
-                    HStack {
-                        Text(kind == .fixed ? "Erwartet" : "Budget")
-                            .font(.subheadline).foregroundStyle(Palette.muted)
-                        Spacer(minLength: 12)
-                        TextField("0", text: $amount)
-                            .multilineTextAlignment(.trailing)
-                            .font(.subheadline.weight(.medium))
-                            .monospacedDigit()
-                            .keyboardType(.decimalPad)
-                        Text("€").font(.subheadline).foregroundStyle(Palette.muted)
-                    }
-                    .padding(Metrics.cardPadding)
+                    .buttonStyle(PressableRowStyle())
+                    .accessibilityLabel(candidate.rawValue)
+                    .accessibilityAddTraits(tint == candidate ? [.isSelected] : [])
                 }
             }
+        }
+    }
 
-            if kind == .income {
-                Text("Einnahmen haben kein Budget — hier zählt nur, was tatsächlich reinkam.")
+    private var directionRow: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            label("Seite")
+            HStack(spacing: 4) {
+                ForEach(Direction.allCases, id: \.self) { candidate in
+                    let isOn = currentDirection == candidate
+                    Button { currentDirection = candidate } label: {
+                        Text(candidate.plural)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(isOn ? Palette.canvas : Palette.muted)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background { if isOn { Capsule().fill(Palette.ink) } }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(isOn ? [.isSelected] : [])
+                }
+            }
+            .padding(4)
+            .background(Capsule().fill(Palette.raised))
+
+            if editing != nil {
+                Text("Wechselt die Seite, ziehen die bisherigen Buchungen dieser Kategorie mit um.")
                     .font(.caption)
-                    .foregroundStyle(Palette.muted)
-                    .padding(.horizontal, 6)
+                    .foregroundStyle(Palette.faint)
             }
         }
     }
 
-    private var deleteSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            CardStack {
-                Button(role: .destructive) {
-                    showsDeleteConfirmation = true
-                } label: {
-                    HStack {
-                        Text("Kategorie löschen")
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(Palette.warn)
-                        Spacer()
-                    }
-                    .padding(Metrics.cardPadding)
-                }
-                .buttonStyle(PressableRowStyle())
-            }
-            Text("Regeln und Zuordnungen dieser Kategorie werden entfernt. Die Buchungen selbst bleiben und landen wieder im Inbox.")
-                .font(.caption)
-                .foregroundStyle(Palette.muted)
-                .padding(.horizontal, 6)
+    private var deleteButton: some View {
+        Button(role: .destructive) { showsDeleteConfirmation = true } label: {
+            Text("Kategorie löschen")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Palette.negative)
+                .frame(maxWidth: .infinity, minHeight: 48)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Palette.negative.opacity(0.10)))
         }
-        .alert("Kategorie löschen?", isPresented: $showsDeleteConfirmation) {
-            Button("Löschen", role: .destructive) {
-                if let category { store.deleteCategory(category.id) }
-                dismiss()
-            }
-            Button("Abbrechen", role: .cancel) {}
-        }
+        .buttonStyle(PressableRowStyle())
     }
 
-    // MARK: Actions
+    private func label(_ text: String) -> some View {
+        Text(text)
+            .font(.caption.weight(.semibold))
+            .textCase(.uppercase)
+            .kerning(0.6)
+            .foregroundStyle(Palette.muted)
+    }
 
-    private func load() {
-        guard !loaded else { return }
-        loaded = true
-        if let category {
-            name = category.name
-            kind = category.kind
-            if let budget = store.data.budgets[category.id] {
-                amount = MoneyFormat.plain(budget)
-            }
+    // MARK: - Ablauf
+
+    private func prepare() {
+        guard !prepared else { return }
+        prepared = true
+
+        if let editing {
+            name = editing.name
+            symbol = editing.symbol
+            tint = editing.tint
+            currentDirection = editing.direction
         } else {
-            kind = defaultKind
+            currentDirection = direction
+            // Ein Ton, der noch nicht vergeben ist — zwei gleichfarbige Segmente wären
+            // im Ring nicht auseinanderzuhalten.
+            let used = Set(store.data.categories.map(\.tint.rawValue))
+            tint = CategoryTint.all.first { !used.contains($0.rawValue) } ?? .azure
+            nameFocused = true
         }
-    }
-
-    private func apply(_ template: CategoryTemplate) {
-        pickedTemplate = template
-        name = template.name
-        kind = template.kind
-        amount = template.suggestedBudget.map(MoneyFormat.plain) ?? ""
     }
 
     private func save() {
-        let trimmed = name.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return }
-
-        let id: BudgetCategory.ID
-        if let category {
-            store.renameCategory(category.id, to: trimmed)
-            store.setKind(kind, for: category.id)
-            id = category.id
-        } else if let template = pickedTemplate, template.name == trimmed, template.kind == kind {
-            // Picked a template and left it alone — bring its rules along.
-            id = store.addCategory(from: template).id
+        let saved: BudgetCategory
+        if var editing {
+            editing.name = name
+            editing.symbol = symbol
+            editing.tint = tint
+            editing.direction = currentDirection
+            store.updateCategory(editing)
+            saved = editing
         } else {
-            id = store.addCategory(name: trimmed, kind: kind).id
+            saved = store.addCategory(
+                name: name, symbol: symbol, tint: tint, direction: currentDirection)
         }
-
-        store.setBudget(kind == .income ? 0 : (parsedAmount ?? 0), for: id)
-        saved.toggle()
+        onSave?(saved)
         dismiss()
     }
+}
+
+#Preview("Kategorie") {
+    CategoryEditorSheet(store: .preview, editing: nil)
 }
