@@ -22,19 +22,21 @@ struct SuggestEntryIntent: AppIntent {
 
     static let openAppWhenRun = false
 
+    /// Der Rohtext, aus dem geraten wird. Optional, weil Raten der schlechtere Weg
+    /// ist: Wer `Händler` und `Betrag` direkt füllen kann — der Wallet-Auslöser kann
+    /// das —, soll dieses Feld leer lassen dürfen.
     @Parameter(
         title: "Text",
         inputOptions: String.IntentInputOptions(
             capitalizationType: .none, multiline: true,
             autocorrect: false, smartQuotes: false, smartDashes: false))
-    var text: String
+    var text: String?
 
-    /// Wenn der Auslöser den Händler schon kennt, muss er nicht geraten werden.
+    /// Kennt der Auslöser den Händler, muss er nicht geraten werden.
     @Parameter(title: "Händler")
     var merchant: String?
 
-    /// Beides optional und nur als Rückfalltür: Steht der Betrag nicht im Text oder
-    /// ist der Händler unbekannt, wird hier nachgefragt.
+    /// Dasselbe für den Betrag. Was hier steht, hat Vorrang vor dem Text.
     @Parameter(title: "Betrag (€)")
     var amount: String?
 
@@ -42,9 +44,10 @@ struct SuggestEntryIntent: AppIntent {
     var category: String?
 
     static var parameterSummary: some ParameterSummary {
-        Summary("Buchung aus \(\.$text) vorschlagen") {
+        Summary("Buchung vorschlagen") {
             \.$merchant
             \.$amount
+            \.$text
             \.$category
         }
     }
@@ -56,7 +59,7 @@ struct SuggestEntryIntent: AppIntent {
         let value = try await resolvedAmount()
         guard value > 0 else { throw QuickLogError.zeroAmount }
 
-        let name = merchant ?? MerchantKey.guess(in: text)
+        let name = merchant?.trimmed ?? text.flatMap(MerchantKey.guess)
         let chosen = try await resolvedCategory(for: name, in: store)
 
         // Der Vorschlag. Gebucht wird erst nach dem Tippen auf „Hinzufügen" — das ist
@@ -82,9 +85,10 @@ struct SuggestEntryIntent: AppIntent {
 
     // MARK: - Auflösen
 
+    /// Erst das ausdrücklich gesetzte Feld, dann der Text, dann die Rückfrage.
     private func resolvedAmount() async throws -> Decimal {
         if let amount, let given = QuickLogIntent.normalized(amount), given > 0 { return given }
-        if let found = MoneyFormat.firstAmount(in: text) { return found }
+        if let text, let found = MoneyFormat.firstAmount(in: text) { return found }
         return QuickLogIntent.normalized(
             try await $amount.requestValue(IntentDialog("Wie viel? (€)"))) ?? 0
     }
@@ -119,5 +123,14 @@ struct SuggestEntryIntent: AppIntent {
             return "\(amount) als \(category.name) buchen?"
         }
         return "\(amount) bei \(merchant) als \(category.name) buchen?"
+    }
+}
+
+private extension String {
+    /// Ein Händlername aus einem Auslöser bringt gern Leerraum mit — und ein leeres
+    /// Feld ist kein Händler, sondern eine fehlende Angabe.
+    var trimmed: String? {
+        let clean = trimmingCharacters(in: .whitespacesAndNewlines)
+        return clean.isEmpty ? nil : clean
     }
 }
