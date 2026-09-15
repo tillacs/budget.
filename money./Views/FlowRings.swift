@@ -33,6 +33,8 @@ struct FlowRings<Center: View>: View {
     private let outerWidth: CGFloat = 23
     private let innerWidth: CGFloat = 9
     private let ringGap: CGFloat = 10
+    /// Der sichtbare Abstand zwischen zwei Segmenten, in Punkten.
+    private let segmentGap: CGFloat = 4
 
     var body: some View {
         GeometryReader { proxy in
@@ -72,14 +74,13 @@ struct FlowRings<Center: View>: View {
     private func ring(_ direction: Direction, geometry: Geometry) -> some View {
         let radius = direction == .expense ? geometry.outerRadius : geometry.innerRadius
         let width = direction == .expense ? outerWidth : innerWidth
-        let segments = segments(for: direction)
 
         ZStack {
             Circle()
                 .strokeBorder(Palette.track, lineWidth: width)
                 .frame(width: radius * 2 + width, height: radius * 2 + width)
 
-            ForEach(segments) { segment in
+            ForEach(segments(for: direction, radius: radius, width: width)) { segment in
                 let isSelected = selection?.categoryID == segment.id
                     && selection?.direction == direction
 
@@ -112,30 +113,75 @@ struct FlowRings<Center: View>: View {
         let cap: CGLineCap
     }
 
-    private func segments(for direction: Direction) -> [Segment] {
+    private func segments(
+        for direction: Direction, radius: CGFloat, width: CGFloat
+    ) -> [Segment] {
         let ring = summary.ring(direction)
         let sweep = summary.sweep(direction)
         guard sweep > 0, !ring.slices.isEmpty else { return [] }
 
-        // Die Lücke zwischen zwei Segmenten ist so breit wie nötig, um die runden
-        // Enden voneinander zu trennen — und schrumpft mit, wenn viele kleine
-        // Kategorien um denselben Platz konkurrieren.
-        let single = ring.slices.count == 1
-        let gap = single ? 0 : min(0.012, sweep / Double(ring.slices.count) * 0.22)
+        // Ein einzelnes Segment über den ganzen Kreis schließt mit stumpfen Enden
+        // sauber zusammen; eine Lücke hätte dort keinen Gegenüber.
+        if ring.slices.count == 1, sweep >= 0.999 {
+            let slice = ring.slices[0]
+            return [Segment(
+                id: slice.category.id, tint: slice.category.tint,
+                start: 0, length: 1, cap: .butt)]
+        }
+
+        // Ein rundes Ende ragt eine halbe Strichstärke über den Bogen hinaus. Eine
+        // Lücke muss diesen Überstand erst abtragen, bevor überhaupt Abstand
+        // entsteht — sonst schieben sich benachbarte Segmente übereinander.
+        let circumference = 2 * .pi * radius
+        let capOverhang = Double(width / 2 / circumference)
+        let breathing = ring.slices.count == 1 ? 0 : Double(segmentGap / circumference)
+        let dot = Double(1.5 / circumference)
+
+        var gap = 2 * capOverhang + breathing
+        // Weniger als diesen Bogen kann ein Segment nicht einnehmen, ohne unsichtbar
+        // zu werden: Was übrig bleibt, wäre kürzer als sein eigenes rundes Ende.
+        var minimumSpan = gap + dot
+
+        // Passen die Mindestbreiten nicht in den Ring, wird zuerst die Luft zwischen
+        // den Segmenten zurückgenommen — lieber eng als lückenhaft.
+        let count = Double(ring.slices.count)
+        if minimumSpan * count > sweep {
+            minimumSpan = sweep / count
+            gap = max(0, minimumSpan - dot)
+        }
+
+        // Kategorien unter der Mindestbreite bekommen sie, und was dafür fehlt, wird
+        // den größeren anteilig abgezogen.
+        //
+        // Das verschiebt die Proportionen um wenige Zehntel Prozent — der Preis
+        // dafür, dass eine Kategorie mit 2 % nicht einfach aus dem Bild fällt. Die
+        // genauen Anteile stehen ohnehin in der Liste darunter.
+        var spans = ring.slices.map { sweep * $0.share }
+        let deficit = spans.reduce(0) { $0 + max(0, minimumSpan - $1) }
+        if deficit > 0 {
+            let surplus = spans.reduce(0) { $0 + max(0, $1 - minimumSpan) }
+            if surplus > 0 {
+                let factor = min(1, deficit / surplus)
+                spans = spans.map {
+                    $0 > minimumSpan ? $0 - ($0 - minimumSpan) * factor : minimumSpan
+                }
+            }
+        }
 
         var cursor: Double = 0
-        return ring.slices.map { slice in
-            let span = sweep * slice.share
+        return zip(ring.slices, spans).map { slice, span in
             let segment = Segment(
                 id: slice.category.id,
                 tint: slice.category.tint,
                 start: cursor + gap / 2,
-                length: max(0.0016, span - gap),
-                cap: single && sweep >= 0.999 ? .butt : .round)
+                // Bleibt nichts übrig, wird daraus ein Punkt — das runde Ende allein.
+                length: max(dot, span - gap),
+                cap: .round)
             cursor += span
             return segment
         }
     }
+
 
     // MARK: Treffer
 
@@ -157,8 +203,10 @@ struct FlowRings<Center: View>: View {
         var turns = (atan2(dy, dx) / (2 * .pi)) + 0.25
         if turns < 0 { turns += 1 }
 
-        for segment in segments(for: direction)
-        where turns >= segment.start - 0.01 && turns <= segment.start + segment.length + 0.01 {
+        let radius = direction == .expense ? geometry.outerRadius : geometry.innerRadius
+        let width = direction == .expense ? outerWidth : innerWidth
+        for segment in segments(for: direction, radius: radius, width: width)
+        where turns >= segment.start - 0.02 && turns <= segment.start + segment.length + 0.02 {
             return RingSelection(direction: direction, categoryID: segment.id)
         }
         return nil
