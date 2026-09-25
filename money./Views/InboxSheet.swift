@@ -67,6 +67,7 @@ struct InboxSheet: View {
     @State private var accepted = 0
     @State private var rejected = 0
     @State private var pickerFor: InboxGroup?
+    @State private var linkFor: Entry?
     @State private var rejecting: InboxGroup?
     @State private var expanded: Set<String> = []
     @State private var split: Set<String> = []
@@ -99,6 +100,9 @@ struct InboxSheet: View {
                 accepted += 1
                 store.correct(group.ids, to: $0)
             }
+        }
+        .sheet(item: $linkFor) { entry in
+            RefundLinkSheet(store: store, entry: entry)
         }
         .sensoryFeedback(.success, trigger: accepted)
         .sensoryFeedback(.warning, trigger: rejected)
@@ -133,7 +137,8 @@ struct InboxSheet: View {
             onPick: { category in
                 accepted += 1
                 store.correct(group.ids, to: category)
-            })
+            },
+            onLink: { linkFor = group.lead })
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
         .listRowInsets(EdgeInsets(top: 5, leading: Metrics.screenInset, bottom: 5, trailing: Metrics.screenInset))
@@ -218,6 +223,7 @@ private struct InboxRow: View {
     let onSplit: () -> Void
     let onMore: () -> Void
     let onPick: (UUID) -> Void
+    let onLink: () -> Void
 
     private var entry: Entry { group.lead }
     private var category: BudgetCategory? { store.data.category(entry.categoryID) }
@@ -363,6 +369,25 @@ private struct InboxRow: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Alle Kategorien")
+                    if entry.kind == .flow {
+                        // „Das ist kein Geld für mich, das gleicht eine Ausgabe aus."
+                        Button(action: onLink) {
+                            HStack(spacing: 5) {
+                                Image(systemName: "arrow.uturn.backward")
+                                    .font(.caption.weight(.bold))
+                                Text("Ausgleich")
+                                    .font(.caption.weight(.medium))
+                            }
+                            .foregroundStyle(Palette.ink)
+                            .padding(.vertical, 8)
+                            .padding(.horizontal, 12)
+                            .frame(minHeight: 34)
+                            .glassCapsule(interactive: true)
+                            .contentShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Als Ausgleich einer Ausgabe zuordnen")
+                    }
                     ForEach(options) { option in
                         Button { onPick(option.id) } label: {
                             CategoryChip(category: option, isOn: !isGuess && option.id == entry.categoryID, compact: true)
@@ -422,7 +447,10 @@ struct CategoryPickerSheet: View {
             .navigationTitle("Wohin?")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Abbrechen") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Abbrechen") { dismiss() }.foregroundStyle(Palette.muted)
+                }
+                .sharedBackgroundVisibility(.hidden)
             }
         }
         .tint(Palette.accent)

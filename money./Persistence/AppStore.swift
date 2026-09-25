@@ -34,7 +34,12 @@ final class AppStore {
 
     static func loadFromDisk(file: DataFile = .applicationDefault) -> AppStore {
         do {
-            if let stored = try file.load() { return AppStore(data: stored, file: file) }
+            if let stored = try file.load() {
+                let store = AppStore(data: stored, file: file)
+                // Was die App inzwischen dazugelernt hat, soll auch für alte Vorschläge gelten.
+                store.rerankProposals()
+                return store
+            }
         } catch {
             // Eine unlesbare Datei darf die App nicht blockieren. Das gilt auch für die
             // alte Import-Datei aus Schema 1: Sie enthält nichts, was sich in Buchungen
@@ -217,7 +222,9 @@ final class AppStore {
         entry.refundOf = nil
         entry.status = .proposed
         entry.categoryID = data.categories(for: .income).first?.id ?? BudgetCategory.noneID
-        entry.suggestion = Suggestion(categoryID: entry.categoryID, confidence: 0)
+        // Die Ablehnung bleibt stehen, sonst würde derselbe Ausgleich gleich wieder
+        // vorgeschlagen.
+        entry.suggestion = Suggestion(categoryID: entry.categoryID, confidence: 0, decision: .rejected)
         data.entries[i] = entry
         rerankProposals()
         persist()
@@ -304,12 +311,32 @@ final class AppStore {
         for i in data.entries.indices {
             let draft = data.entries[i]
             guard draft.status == .proposed, draft.kind != .transfer, draft.refundOf == nil,
-                  draft.source == .tradeRepublic,
-                  let ranking = SuggestionEngine.rank(
+                  draft.source == .tradeRepublic else { continue }
+            // Ein offener Eingang von einer Person, der genau zu einer Ausgabe passt,
+            // wird zum Ausgleich-Vorschlag — auch nachträglich, für ältere Importe.
+            if draft.kind == .flow, draft.direction == .income,
+               draft.importType?.hasPrefix("TRANSFER") == true,
+               draft.suggestion?.decision != .rejected,
+               let original = ImportPipeline.reimbursementTarget(for: draft, in: data) {
+                data.entries[i].kind = .refund
+                data.entries[i].direction = .expense
+                data.entries[i].categoryID = original.categoryID
+                data.entries[i].refundOf = original.id
+                data.entries[i].suggestion = Suggestion(
+                    categoryID: original.categoryID, confidence: 0.55,
+                    alternatives: data.categories(for: .income).prefix(2).map(\.id),
+                    evidence: [Evidence(
+                        kind: .refund,
+                        text: "gleicher Betrag wie \(original.title.isEmpty ? MoneyFormat.amount(original.amount) : original.title) vom \(MoneyFormat.day(original.date))",
+                        strength: 0.55)])
+                continue
+            }
+            guard let ranking = SuggestionEngine.rank(
                       draft, categories: data.categories, memory: data.memory,
                       lastUsed: data.lastUsed[draft.direction.rawValue], history: history)
             else { continue }
             var suggestion = ranking.suggestion
+            suggestion.decision = draft.suggestion?.decision
             if draft.kind == .refund {
                 suggestion.evidence.insert(
                     Evidence(kind: .refund, text: "Erstattung ohne passende Ausgabe", strength: 0), at: 0)
