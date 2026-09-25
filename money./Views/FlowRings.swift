@@ -32,6 +32,7 @@ struct FlowRings<Center: View>: View {
     /// das, worum es in dieser App geht; die Einnahmen sind der Maßstab dazu.
     private let outerWidth: CGFloat = 23
     private let innerWidth: CGFloat = 9
+    private let investWidth: CGFloat = 6
     private let ringGap: CGFloat = 10
     /// Der sichtbare Abstand zwischen zwei Segmenten, in Punkten.
     private let segmentGap: CGFloat = 4
@@ -40,14 +41,16 @@ struct FlowRings<Center: View>: View {
         GeometryReader { proxy in
             let side = min(proxy.size.width, proxy.size.height)
             let geometry = Geometry(
-                side: side, outerWidth: outerWidth, innerWidth: innerWidth, ringGap: ringGap)
+                side: side, outerWidth: outerWidth, innerWidth: innerWidth,
+                investWidth: investWidth, ringGap: ringGap)
 
             ZStack {
                 ring(.expense, geometry: geometry)
                 ring(.income, geometry: geometry)
+                ring(.invest, geometry: geometry)
 
                 center
-                    .frame(width: geometry.innerRadius * 2 - innerWidth - 22)
+                    .frame(width: geometry.investRadius * 2 - investWidth - 18)
             }
             .frame(width: side, height: side)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -72,8 +75,8 @@ struct FlowRings<Center: View>: View {
 
     @ViewBuilder
     private func ring(_ direction: Direction, geometry: Geometry) -> some View {
-        let radius = direction == .expense ? geometry.outerRadius : geometry.innerRadius
-        let width = direction == .expense ? outerWidth : innerWidth
+        let radius = geometry.radius(direction)
+        let width = width(direction)
 
         ZStack {
             Circle()
@@ -194,8 +197,10 @@ struct FlowRings<Center: View>: View {
         let direction: Direction
         if abs(distance - geometry.outerRadius) <= outerWidth / 2 + 8 {
             direction = .expense
-        } else if abs(distance - geometry.innerRadius) <= innerWidth / 2 + 8 {
+        } else if abs(distance - geometry.innerRadius) <= innerWidth / 2 + 6 {
             direction = .income
+        } else if abs(distance - geometry.investRadius) <= investWidth / 2 + 6 {
+            direction = .invest
         } else {
             return nil
         }
@@ -203,8 +208,8 @@ struct FlowRings<Center: View>: View {
         var turns = (atan2(dy, dx) / (2 * .pi)) + 0.25
         if turns < 0 { turns += 1 }
 
-        let radius = direction == .expense ? geometry.outerRadius : geometry.innerRadius
-        let width = direction == .expense ? outerWidth : innerWidth
+        let radius = geometry.radius(direction)
+        let width = width(direction)
         for segment in segments(for: direction, radius: radius, width: width)
         where turns >= segment.start - 0.02 && turns <= segment.start + segment.length + 0.02 {
             return RingSelection(direction: direction, categoryID: segment.id)
@@ -218,16 +223,36 @@ struct FlowRings<Center: View>: View {
 
     private var accessibilityLabel: String {
         "Ausgaben \(MoneyFormat.amount(summary.expenses.total)), "
-            + "Einnahmen \(MoneyFormat.amount(summary.income.total))"
+            + "Einnahmen \(MoneyFormat.amount(summary.income.total)), "
+            + "Investiert \(MoneyFormat.amount(summary.invested.total))"
     }
 
+    private func width(_ direction: Direction) -> CGFloat {
+        switch direction {
+        case .expense: return outerWidth
+        case .income: return innerWidth
+        case .invest: return investWidth
+        }
+    }
+
+    /// Drei Radien: außen die Ausgaben, dann die Einnahmen, innen das Depot.
     private struct Geometry {
         let outerRadius: CGFloat
         let innerRadius: CGFloat
+        let investRadius: CGFloat
 
-        init(side: CGFloat, outerWidth: CGFloat, innerWidth: CGFloat, ringGap: CGFloat) {
+        init(side: CGFloat, outerWidth: CGFloat, innerWidth: CGFloat, investWidth: CGFloat, ringGap: CGFloat) {
             outerRadius = (side - outerWidth) / 2
             innerRadius = outerRadius - outerWidth / 2 - ringGap - innerWidth / 2
+            investRadius = innerRadius - innerWidth / 2 - ringGap + 2 - investWidth / 2
+        }
+
+        func radius(_ direction: Direction) -> CGFloat {
+            switch direction {
+            case .expense: return outerRadius
+            case .income: return innerRadius
+            case .invest: return investRadius
+            }
         }
     }
 }

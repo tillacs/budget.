@@ -61,10 +61,12 @@ nonisolated enum ImportPipeline {
         let ordered = rows.sorted { ($0.datetime, $0.transactionID) < ($1.datetime, $1.transactionID) }
         var rowAmounts: [YearMonth: Decimal] = [:]
         var entryAmounts: [YearMonth: Decimal] = [:]
+        var history = HistoryIndex(data.entries)
 
         func append(_ entry: Entry) {
             index[entry.id] = data.entries.count
             data.entries.append(entry)
+            history.add(entry)
             entryAmounts[entry.month, default: 0] += entry.signedAmount
         }
         func replace(_ entry: Entry) {
@@ -190,7 +192,7 @@ nonisolated enum ImportPipeline {
             let ranking = SuggestionEngine.rank(
                 draft, categories: data.categories, memory: data.memory,
                 lastUsed: data.lastUsed[draft.direction.rawValue],
-                history: data.entries, now: now)
+                history: history, now: now)
             guard let ranking else {
                 // Keine Kategorie in dieser Richtung — kann bei einer alten Datei
                 // ohne Investiert-Bereich passieren. Dann wird eine angelegt.

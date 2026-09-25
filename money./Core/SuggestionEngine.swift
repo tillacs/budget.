@@ -19,6 +19,23 @@ nonisolated struct Ranking: Hashable, Sendable {
     let autoEligible: Bool
 }
 
+/// Buchungen nach Händlerschlüssel, einmal gebaut statt bei jedem Vorschlag neu
+/// durchsucht — bei 1.600 Zeilen ist das der Unterschied zwischen Sekunden und nichts.
+nonisolated struct HistoryIndex: Sendable {
+    private var byKey: [String: [Entry]] = [:]
+
+    init(_ entries: [Entry] = []) {
+        for entry in entries { add(entry) }
+    }
+
+    mutating func add(_ entry: Entry) {
+        guard let key = entry.merchant.flatMap(MerchantKey.normalized) else { return }
+        byKey[key, default: []].append(entry)
+    }
+
+    func entries(forMerchantKey key: String) -> [Entry] { byKey[key] ?? [] }
+}
+
 nonisolated enum SuggestionEngine {
     /// Feste Vorbelegungen je Buchungstyp: Zinsen sind Kapitalerträge, ein Sparplan
     /// ist ein Sparplan. Greift nur, wenn eine Kategorie dieses Namens existiert.
@@ -40,7 +57,7 @@ nonisolated enum SuggestionEngine {
         categories: [BudgetCategory],
         memory: MerchantMemory,
         lastUsed: UUID?,
-        history: [Entry],
+        history: HistoryIndex,
         now: Date = Date()
     ) -> Ranking? {
         let candidates = categories.filter { $0.direction == draft.direction }
@@ -100,9 +117,8 @@ nonisolated enum SuggestionEngine {
         // 3. Wiederkehrend: gleicher Händler, gleicher Betrag, etwa monatlich
         if let key = signals.merchantKey, draft.amount > 0 {
             let tolerance = draft.amount * Decimal(string: "0.02")!
-            let same = history.filter {
+            let same = history.entries(forMerchantKey: key).filter {
                 $0.counts && $0.direction == draft.direction
-                    && $0.merchant.flatMap(MerchantKey.normalized) == key
                     && abs($0.amount - draft.amount) <= tolerance
             }
             let monthly = same.filter { previous in
@@ -118,20 +134,25 @@ nonisolated enum SuggestionEngine {
         // dieselbe Bestätigung dreimal zählen (Händler, Wort, MCC).
         if !signals.tokens.isEmpty, !merchantKnown {
             var tokenScores: [UUID: Double] = [:]
+            var bestToken: [UUID: (token: String, score: Double)] = [:]
             var known = 0
             for token in signals.tokens {
                 let weights = MerchantMemory.weights(memory.byToken[token], now: now)
+                    .filter { allowed.contains($0.key) }
                 let total = weights.values.reduce(0, +)
                 guard total > 0 else { continue }
                 known += 1
                 let certainty = min(1, total / 3)
                 for (id, weight) in weights {
-                    tokenScores[id, default: 0] += 0.85 * (weight / total) * certainty
+                    let score = 0.85 * (weight / total) * certainty
+                    tokenScores[id, default: 0] += score
+                    if score > (bestToken[id]?.score ?? 0) { bestToken[id] = (token, score) }
                 }
             }
             if known > 0 {
                 for (id, score) in tokenScores {
-                    add(id, score / Double(known), .token, "\u{201E}\(signals.tokens.first ?? "")\u{201C} bisher meist \(name(id))")
+                    let token = bestToken[id]?.token ?? signals.tokens[0]
+                    add(id, score / Double(known), .token, "\u{201E}\(token)\u{201C} bisher meist \(name(id))")
                 }
             }
         }

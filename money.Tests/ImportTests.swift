@@ -270,7 +270,7 @@ struct SuggestionEngineTests {
     @Test func vorbelegungNachHändlercodeIstNurEinVorschlag() throws {
         let data = AppData.seeded()
         let ranking = try #require(SuggestionEngine.rank(
-            draft("ALDI SUED"), categories: data.categories, memory: data.memory, lastUsed: nil, history: []))
+            draft("ALDI SUED"), categories: data.categories, memory: data.memory, lastUsed: nil, history: HistoryIndex()))
         #expect(data.category(ranking.suggestion.categoryID)?.name == "Lebensmittel")
         #expect(ranking.suggestion.band == .likely)
         #expect(ranking.autoEligible == false)
@@ -280,7 +280,7 @@ struct SuggestionEngineTests {
     @Test func ohneJedenAnhaltspunktBleibtEsUnsicher() throws {
         let data = AppData.seeded()
         let ranking = try #require(SuggestionEngine.rank(
-            draft("Irgendwas", mcc: "7399"), categories: data.categories, memory: data.memory, lastUsed: nil, history: []))
+            draft("Irgendwas", mcc: "7399"), categories: data.categories, memory: data.memory, lastUsed: nil, history: HistoryIndex()))
         #expect(ranking.suggestion.band == .unsure)
     }
 
@@ -290,13 +290,13 @@ struct SuggestionEngineTests {
         let d = draft("ALDI SUED")
 
         data.memory.confirm(d.signals, as: essen.id)
-        var ranking = try #require(SuggestionEngine.rank(d, categories: data.categories, memory: data.memory, lastUsed: nil, history: []))
+        var ranking = try #require(SuggestionEngine.rank(d, categories: data.categories, memory: data.memory, lastUsed: nil, history: HistoryIndex()))
         #expect(ranking.suggestion.categoryID == essen.id)
         #expect(ranking.autoEligible == false)
         #expect(ranking.suggestion.confidence < 0.9)
 
         data.memory.confirm(d.signals, as: essen.id)
-        ranking = try #require(SuggestionEngine.rank(d, categories: data.categories, memory: data.memory, lastUsed: nil, history: []))
+        ranking = try #require(SuggestionEngine.rank(d, categories: data.categories, memory: data.memory, lastUsed: nil, history: HistoryIndex()))
         #expect(ranking.autoEligible)
         #expect(ranking.suggestion.confidence >= 0.9)
         #expect(ranking.suggestion.reason.contains("2×"))
@@ -308,7 +308,7 @@ struct SuggestionEngineTests {
         let d = draft("ALDI SUED")
         data.memory.confirm(d.signals, as: essen.id)
         data.memory.reject(d.signals, as: essen.id)
-        let ranking = try #require(SuggestionEngine.rank(d, categories: data.categories, memory: data.memory, lastUsed: nil, history: []))
+        let ranking = try #require(SuggestionEngine.rank(d, categories: data.categories, memory: data.memory, lastUsed: nil, history: HistoryIndex()))
         #expect(ranking.suggestion.categoryID != essen.id)
     }
 
@@ -317,7 +317,7 @@ struct SuggestionEngineTests {
         let lebensmittel = try #require(data.categories.first { $0.name == "Lebensmittel" })
         for _ in 0..<3 { data.memory.confirm(draft("EDEKA Muenchen. Impler").signals, as: lebensmittel.id) }
         let ranking = try #require(SuggestionEngine.rank(
-            draft("EDEKA Ebenhausen", mcc: nil), categories: data.categories, memory: data.memory, lastUsed: nil, history: []))
+            draft("EDEKA Ebenhausen", mcc: nil), categories: data.categories, memory: data.memory, lastUsed: nil, history: HistoryIndex()))
         #expect(ranking.suggestion.categoryID == lebensmittel.id)
         #expect(ranking.suggestion.evidence.contains { $0.kind == .token })
         // Neue Filiale: noch nie bestätigt, also keine Automatik.
@@ -331,7 +331,7 @@ struct SuggestionEngineTests {
         let d = draft("Hoereder Beck", mcc: "5462")
         data.memory.confirm(d.signals, as: essen.id)
         data.memory.confirm(d.signals, as: lebensmittel.id)
-        let ranking = try #require(SuggestionEngine.rank(d, categories: data.categories, memory: data.memory, lastUsed: nil, history: []))
+        let ranking = try #require(SuggestionEngine.rank(d, categories: data.categories, memory: data.memory, lastUsed: nil, history: HistoryIndex()))
         // Der Händler selbst sagt nichts mehr; der Händlercode gibt den Ausschlag —
         // aber ohne klare Bestätigung bucht die Maschine nicht von allein.
         #expect(ranking.suggestion.evidence.allSatisfy { $0.kind != .merchant })
@@ -350,7 +350,7 @@ struct SuggestionEngineTests {
         data.memory.confirm(previous.signals, as: abos.id)
         let ranking = try #require(SuggestionEngine.rank(
             draft("fraenk", mcc: "4814", amount: "10.00", day: 10),
-            categories: data.categories, memory: data.memory, lastUsed: nil, history: [previous]))
+            categories: data.categories, memory: data.memory, lastUsed: nil, history: HistoryIndex([previous])))
         #expect(ranking.suggestion.evidence.contains { $0.kind == .recurring })
         #expect(ranking.suggestion.confidence >= 0.9)
     }

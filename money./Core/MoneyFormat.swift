@@ -98,28 +98,6 @@ nonisolated enum MoneyFormat {
         return (amount, note)
     }
 
-    /// Den Betrag aus einem Fließtext ziehen — etwa aus einer Zahlungsmail.
-    ///
-    /// Gesucht wird ausschließlich **neben einem Währungszeichen**. Das ist eine harte
-    /// Einschränkung mit Absicht: Ohne sie liest „Bestellung vom 03.09." sich als 3,09 €,
-    /// und ein falsch geratener Betrag ist schlimmer als eine Rückfrage. Findet sich
-    /// keiner, gibt diese Funktion nichts zurück und der Aufrufer fragt nach.
-    static func firstAmount(in text: String) -> Decimal? {
-        // „12,50 €" und „€ 12,50" / „EUR 12,50" — beide Seiten, beide Schreibweisen.
-        let pattern = "(?:€|EUR)\\s*([0-9][0-9.,]*)|([0-9][0-9.,]*)\\s*(?:€|EUR)"
-        guard let expression = try? NSRegularExpression(
-            pattern: pattern, options: [.caseInsensitive]) else { return nil }
-
-        let range = NSRange(text.startIndex..., in: text)
-        for match in expression.matches(in: text, range: range) {
-            for group in 1..<match.numberOfRanges {
-                guard let found = Range(match.range(at: group), in: text) else { continue }
-                if let amount = parse(String(text[found])), amount > 0 { return amount }
-            }
-        }
-        return nil
-    }
-
     static func month(_ value: YearMonth) -> String {
         guard let date = firstDay(of: value) else { return "\(value.month)/\(value.year)" }
         return date.formatted(.dateTime.month(.wide).year())

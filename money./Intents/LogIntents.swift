@@ -62,15 +62,6 @@ struct BudgetAppShortcuts: AppShortcutsProvider {
             systemImageName: "plus.circle")
 
         AppShortcut(
-            intent: SuggestEntryIntent(),
-            phrases: [
-                "Vorschlag in \(.applicationName)",
-                "\(.applicationName) Buchung vorschlagen",
-            ],
-            shortTitle: "Vorschlag",
-            systemImageName: "text.magnifyingglass")
-
-        AppShortcut(
             intent: LogIncomeIntent(),
             phrases: [
                 "Einnahme in \(.applicationName)",

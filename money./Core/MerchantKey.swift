@@ -32,6 +32,11 @@ nonisolated enum MerchantKey {
         if let range = text.range(of: "sagt danke", options: .caseInsensitive) {
             text = String(text[..<range.lowerBound])
         }
+        // Rechtsformen, die niemand lesen will: „PayPal Europe S.a.r.l. et Cie S.C.A".
+        for suffix in ["S.a.r.l.", "S.a r.l.", "S.à r.l.", "et Cie,", "et Cie", "S.C.A.", "S.C.A"] {
+            text = text.replacingOccurrences(of: suffix, with: " ", options: .caseInsensitive)
+        }
+        text = text.trimmingCharacters(in: CharacterSet(charactersIn: " ,"))
         return text.split(separator: " ", omittingEmptySubsequences: true).joined(separator: " ")
     }
 
@@ -91,23 +96,5 @@ nonisolated enum MerchantKey {
 
     private static func words(of text: String) -> [String] {
         text.split { !($0.isLetter || $0.isNumber) }.map(String.init)
-    }
-
-    /// Den Händler aus einem Fließtext raten.
-    ///
-    /// Gesucht wird ein großgeschriebenes Wort nach „an", „bei", „von" oder „für" —
-    /// so schreiben Zahlungsmails es: „Du hast 12,50 € an REWE gesendet". Trifft das
-    /// nicht zu, kommt nichts zurück; dann fragt die Aktion eben nach der Kategorie,
-    /// statt eine falsche vorzuschlagen.
-    static func guess(in text: String) -> String? {
-        let pattern = "\\b(?:an|bei|von|für|at|to)\\s+"
-            + "([\\p{Lu}][\\p{L}0-9&.\\-]*(?:\\s+[\\p{Lu}][\\p{L}0-9&.\\-]*)?)"
-        guard let expression = try? NSRegularExpression(pattern: pattern) else { return nil }
-
-        let range = NSRange(text.startIndex..., in: text)
-        guard let match = expression.firstMatch(in: text, range: range),
-              let found = Range(match.range(at: 1), in: text)
-        else { return nil }
-        return String(text[found])
     }
 }

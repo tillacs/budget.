@@ -2,24 +2,38 @@
 // budget. — die Seite, auf der alles steht
 //
 // Zwei Seiten, nicht mehr: die Übersicht und, einen Wisch nach links, die Kategorien.
-// Die Übersicht hat drei Ebenen, und mehr soll sie nie bekommen:
-//   1. der Monat        — in der Ringmitte, antippbar
-//   2. die Verteilung   — die Ringe, antippbar
-//   3. die Herkunft     — die Liste, aufklappbar
-// Erfasst wird über das Blatt, das der Kurzbefehl öffnet — oder über das Plus.
+// Die Übersicht hat drei Ebenen:
+//   1. der Monat und das, was übrig bleibt
+//   2. die Verteilung — als Blasen (grob) oder als Ringe (genau), antippbar
+//   3. die Herkunft — die Liste, aufklappbar
+// Dazu, wenn etwas wartet: der Posteingang. Erfasst wird über das Blatt, das der
+// Kurzbefehl öffnet — oder über das Plus.
 
 import SwiftUI
 
 enum HomeSheet: Identifiable, Hashable {
     case quickEntry(Direction)
     case edit(Entry)
+    case inbox
+    case detail(UUID)
+    case report
 
     var id: String {
         switch self {
         case .quickEntry(let direction): return "neu-\(direction.rawValue)"
         case .edit(let entry): return "bearbeiten-\(entry.id)"
+        case .inbox: return "posteingang"
+        case .detail(let id): return "detail-\(id)"
+        case .report: return "bericht"
         }
     }
+}
+
+enum OverviewMode: String, CaseIterable {
+    case bubbles, rings
+
+    var symbol: String { self == .bubbles ? "circle.hexagongrid.fill" : "circle.circle" }
+    var label: String { self == .bubbles ? "Blasen" : "Ringe" }
 }
 
 struct HomeScreen: View {
@@ -33,12 +47,17 @@ struct HomeScreen: View {
     @State private var sheet: HomeSheet?
     @State private var flight: Flight?
     @Namespace private var totalsSlide
+    @Namespace private var modeSlide
     @State private var pendingFlight: Flight?
+    @AppStorage("overviewMode") private var modeRaw = OverviewMode.bubbles.rawValue
+    @State private var report: ImportReport?
+    @State private var pickerFor: Entry?
 
     private let router = QuickEntryRouter.shared
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    private var mode: OverviewMode { OverviewMode(rawValue: modeRaw) ?? .bubbles }
     private var summary: MonthSummary { store.summary(for: month) }
 
     private var selectedSlice: Slice? {
@@ -64,9 +83,21 @@ struct HomeScreen: View {
         }
         .tint(Palette.accent)
         .sheet(item: $sheet, content: sheetContent)
+        .sheet(item: $pickerFor) { entry in
+            CategoryPickerSheet(store: store, direction: entry.direction, current: entry.categoryID) {
+                store.correct(entry.id, to: $0)
+            }
+        }
         .onChange(of: router.token) { openRequestedEntry() }
         .task { openRequestedEntry() }
         .onChange(of: store.saveTick) { takeOff() }
+        .onChange(of: store.reportTick) {
+            guard let latest = store.lastReport else { return }
+            report = latest
+            if let newest = latest.newestDate { month = newest.yearMonth }
+            page = 0
+            sheet = .report
+        }
         .onChange(of: sheet) { _, new in
             // Das Blatt fährt herunter, bevor die Bestätigung aufsteigt — sonst
             // startet sie dahinter und niemand sieht sie.
@@ -88,6 +119,7 @@ struct HomeScreen: View {
         }
         .sensoryFeedback(.selection, trigger: selection) { _, new in new != nil }
         .sensoryFeedback(.success, trigger: store.saveTick)
+        .sensoryFeedback(.selection, trigger: modeRaw)
     }
 
     // MARK: - Übersicht
@@ -95,22 +127,27 @@ struct HomeScreen: View {
     private var overview: some View {
         ZStack(alignment: .bottomTrailing) {
             ScrollView {
-                // Kein gleichmäßiger Abstand: Der Ring bekommt Luft, die Summen
-                // hängen an ihm dran, und die Liste setzt neu an.
                 VStack(spacing: 0) {
                     header
-                        .padding(.bottom, 4)
-                    rings
-                        .padding(.bottom, 20)
+                        .padding(.bottom, 6)
+                    if store.hasProposals {
+                        inboxPill
+                            .padding(.bottom, 10)
+                    }
+                    visual
+                        .padding(.bottom, 16)
                     totals
-                        .padding(.bottom, 26)
+                        .padding(.bottom, 22)
                     LedgerSection(
                         store: store,
                         ring: summary.ring(listDirection),
                         month: month,
+                        transferTotal: summary.transferTotal,
+                        transferCount: summary.transferCount,
                         selection: $selection,
                         expanded: $expanded,
-                        onEdit: { sheet = .edit($0) })
+                        onEdit: { sheet = .edit($0) },
+                        onRecategorize: { pickerFor = $0 })
                 }
                 .padding(.horizontal, Metrics.screenInset)
                 .padding(.top, 10)
@@ -118,9 +155,10 @@ struct HomeScreen: View {
                 .padding(.bottom, 108)
             }
             .scrollIndicators(.hidden)
+            // Der erste und letzte Monat stauchen sich beim Weiterwischen — die Geste
+            // sitzt auf der ganzen Seite, nicht nur auf der Grafik.
+            .gesture(monthSwipe)
 
-            // Weicher Boden, damit die Liste unter dem Plus verschwindet und nicht
-            // dahinter hängen bleibt.
             LinearGradient(
                 colors: [Palette.canvas.opacity(0), Palette.canvas],
                 startPoint: .top, endPoint: .bottom)
@@ -133,6 +171,20 @@ struct HomeScreen: View {
         }
     }
 
+    /// Ein Wisch über die Seite blättert den Monat — die Seitenwischgeste des
+    /// Pagers bleibt davon unberührt, weil sie deutlich weiter greift.
+    private var monthSwipe: some Gesture {
+        DragGesture(minimumDistance: 40)
+            .onEnded { value in
+                guard abs(value.translation.width) > abs(value.translation.height) * 1.5,
+                      abs(value.translation.width) > 90 else { return }
+                let step = value.translation.width < 0 ? 1 : -1
+                let next = month.advanced(by: step)
+                guard next <= YearMonth.current() else { return }
+                withAnimation(motion) { month = next }
+            }
+    }
+
     // MARK: - Kopf
 
     private var header: some View {
@@ -140,8 +192,7 @@ struct HomeScreen: View {
             WordmarkLabel()
 
             HStack {
-                // Gegengewicht, damit die Wortmarke wirklich mittig steht.
-                Color.clear.frame(width: 34, height: 34)
+                modeToggle
                 Spacer()
                 Button {
                     withAnimation(motion) { page = 1 }
@@ -154,14 +205,107 @@ struct HomeScreen: View {
         }
     }
 
-    // MARK: - Ringe
+    /// Grob oder genau: Blasen oder Ringe. Ein Glas-Schalter, die aktive Seite
+    /// wandert als Fläche.
+    private var modeToggle: some View {
+        HStack(spacing: 2) {
+            ForEach(OverviewMode.allCases, id: \.self) { candidate in
+                let isOn = mode == candidate
+                Button {
+                    withAnimation(motion) { modeRaw = candidate.rawValue }
+                } label: {
+                    Image(systemName: candidate.symbol)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(isOn ? Palette.ink : Palette.faint)
+                        .frame(width: 32, height: 30)
+                        .background {
+                            if isOn {
+                                Capsule().fill(Palette.raised)
+                                    .matchedGeometryEffect(id: "modus", in: modeSlide)
+                            }
+                        }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(candidate.label)
+                .accessibilityAddTraits(isOn ? [.isSelected] : [])
+            }
+        }
+        .padding(2)
+        .glassCapsule()
+    }
 
-    private var rings: some View {
-        FlowRings(summary: summary, selection: $selection) { ringCenter }
-            // Gedeckelt, damit die Grafik auf großen Geräten nicht die ganze Seite
-            // einnimmt — unter den Ringen soll die erste Kategorie sichtbar bleiben.
-            .frame(maxWidth: 310)
-            .frame(maxWidth: .infinity)
+    private var inboxPill: some View {
+        Button { sheet = .inbox } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "tray.full")
+                    .font(.footnote.weight(.semibold))
+                Text("\(store.proposals.count) Vorschläge warten")
+                    .font(.subheadline.weight(.medium))
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Palette.faint)
+            }
+            .foregroundStyle(Palette.ink)
+            .padding(.vertical, 11)
+            .padding(.horizontal, 16)
+            .glassCapsule(interactive: true)
+        }
+        .buttonStyle(.plain)
+        .transition(.opacity.combined(with: .move(edge: .top)))
+    }
+
+    // MARK: - Grafik
+
+    @ViewBuilder
+    private var visual: some View {
+        switch mode {
+        case .bubbles:
+            VStack(spacing: 6) {
+                figureBlock
+                    .padding(.top, 6)
+                BubbleField(
+                    summary: summary,
+                    onTap: { sheet = .detail($0.category.id) },
+                    onPendingTap: { sheet = .inbox })
+                    .frame(height: 340)
+                if summary.isEmpty && !summary.hasPending {
+                    Text("Doppeltipp auf die Rückseite, das Plus —\noder einen Export von Trade Republic teilen.")
+                        .font(.caption)
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(Palette.faint)
+                        .padding(.top, -120)
+                }
+            }
+            .transition(.opacity)
+        case .rings:
+            FlowRings(summary: summary, selection: $selection) { ringCenter }
+                .frame(maxWidth: 310)
+                .frame(maxWidth: .infinity)
+                .padding(.top, 6)
+                .transition(.opacity)
+        }
+    }
+
+    /// Monat und Ergebnis über den Blasen — in den Ringen sitzt dasselbe in der Mitte.
+    private var figureBlock: some View {
+        VStack(spacing: 0) {
+            monthMenu
+            let figure = centerFigure
+            Text(figure.text)
+                .font(.system(size: 40, weight: .semibold))
+                .monospacedDigit()
+                .tracking(-1.4)
+                .contentTransition(.numericText())
+                .foregroundStyle(figure.tone)
+                .lineLimit(1)
+            Text(figure.caption)
+                .font(.system(size: 10, weight: .semibold))
+                .textCase(.uppercase)
+                .kerning(1.4)
+                .foregroundStyle(Palette.faint)
+        }
+        .animation(motion, value: month)
     }
 
     @ViewBuilder
@@ -174,7 +318,7 @@ struct HomeScreen: View {
                     .font(.system(size: 20))
                     .padding(.top, 2)
                 Text(MoneyFormat.hero(slice.total))
-                    .font(.system(size: 38, weight: .semibold))
+                    .font(.system(size: 34, weight: .semibold))
                     .monospacedDigit()
                     .tracking(-1)
                     .foregroundStyle(Palette.tint(slice.category.tint))
@@ -189,16 +333,12 @@ struct HomeScreen: View {
                     .font(.title3.weight(.semibold))
                     .foregroundStyle(Palette.ink)
                     .padding(.top, 6)
-                Text("Doppeltipp auf die Rückseite\noder unten das Plus.")
-                    .font(.caption)
-                    .multilineTextAlignment(.center)
-                    .foregroundStyle(Palette.faint)
             } else {
                 let figure = centerFigure
                 Text(figure.text)
-                    .font(.system(size: 48, weight: .semibold))
+                    .font(.system(size: 40, weight: .semibold))
                     .monospacedDigit()
-                    .tracking(-1.8)
+                    .tracking(-1.6)
                     .contentTransition(.numericText())
                     .foregroundStyle(figure.tone)
                     .lineLimit(1)
@@ -217,8 +357,6 @@ struct HomeScreen: View {
         .accessibilityElement(children: .contain)
     }
 
-    /// Der Monat sitzt in der Ringmitte, nicht über der Seite: Er gehört zu den
-    /// Zahlen, die er begrenzt, und oben wäre er nur eine zweite Leiste.
     private var monthMenu: some View {
         Menu {
             ForEach(selectableMonths, id: \.self) { candidate in
@@ -233,7 +371,6 @@ struct HomeScreen: View {
                 }
             }
         } label: {
-            // Ohne Kapsel: In der Ringmitte zählt jede Fläche, die nicht die Zahl ist.
             HStack(spacing: 3) {
                 Text(MoneyFormat.month(month))
                     .contentTransition(.numericText())
@@ -266,16 +403,19 @@ struct HomeScreen: View {
     }
 
     /// Solange nur eine Seite Zahlen hat, gibt es kein „Übrig" — ein Monat ohne
-    /// erfasste Einnahmen ist kein Monat mit Verlust. Dann steht die Summe da, die
-    /// es wirklich gibt.
+    /// erfasste Einnahmen ist kein Monat mit Verlust.
     private var centerFigure: CenterFigure {
+        if summary.isEmpty {
+            return CenterFigure(caption: "noch nichts", text: "—", tone: Palette.faint)
+        }
         if summary.income.total == 0 {
+            let out = summary.expenses.total + summary.invested.total
             return CenterFigure(
-                caption: "ausgegeben",
-                text: MoneyFormat.hero(summary.expenses.total),
+                caption: summary.invested.total > 0 ? "ausgegeben und angelegt" : "ausgegeben",
+                text: MoneyFormat.hero(out),
                 tone: Palette.ink)
         }
-        if summary.expenses.total == 0 {
+        if summary.expenses.total == 0 && summary.invested.total == 0 {
             return CenterFigure(
                 caption: "eingenommen",
                 text: MoneyFormat.hero(summary.income.total),
@@ -283,16 +423,13 @@ struct HomeScreen: View {
         }
         let net = summary.net
         return CenterFigure(
-            caption: net < 0 ? "zu viel ausgegeben" : "übrig",
+            caption: net < 0 ? "mehr raus als rein" : "übrig",
             text: MoneyFormat.signed(net),
             tone: net < 0 ? Palette.negative : Palette.ink)
     }
 
     // MARK: - Summen
 
-    /// Ein Gerät statt zwei Kästen: Die beiden Summen sitzen in einer Fassung, und
-    /// die aktive Seite wird von einer Fläche unterlegt, die zwischen ihnen wandert.
-    /// Damit ist auf einen Blick klar, dass es sich um einen Umschalter handelt.
     private var totals: some View {
         HStack(spacing: 0) {
             ForEach(Direction.allCases, id: \.self) { direction in
@@ -316,6 +453,7 @@ struct HomeScreen: View {
         .overlay(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .strokeBorder(Palette.hairline, lineWidth: 1))
+        .sensoryFeedback(.selection, trigger: listDirection)
     }
 
     // MARK: - Erfassen
@@ -325,13 +463,13 @@ struct HomeScreen: View {
             sheet = .quickEntry(.expense)
         } label: {
             Image(systemName: "plus")
-                .font(.system(size: 25, weight: .medium))
+                .font(.system(size: 24, weight: .medium))
                 .foregroundStyle(Palette.canvas)
                 .frame(width: 58, height: 58)
-                .background(Circle().fill(Palette.ink))
-                .shadow(color: .black.opacity(0.25), radius: 12, y: 6)
         }
-        .buttonStyle(PressableRowStyle())
+        .buttonStyle(.glassProminent)
+        .buttonBorderShape(.circle)
+        .tint(Palette.ink)
         .padding(.trailing, Metrics.screenInset)
         .padding(.bottom, 26)
         .accessibilityLabel("Ausgabe erfassen")
@@ -341,6 +479,9 @@ struct HomeScreen: View {
             }
             Button { sheet = .quickEntry(.income) } label: {
                 Label("Einnahme erfassen", systemImage: "arrow.up.right")
+            }
+            Button { sheet = .quickEntry(.invest) } label: {
+                Label("Investition erfassen", systemImage: "chart.line.uptrend.xyaxis")
             }
         }
     }
@@ -352,6 +493,22 @@ struct HomeScreen: View {
             QuickEntrySheet(store: store, direction: direction, editing: nil)
         case .edit(let entry):
             QuickEntrySheet(store: store, direction: entry.direction, editing: entry)
+        case .inbox:
+            InboxSheet(store: store)
+        case .detail(let id):
+            if let category = store.data.category(id) {
+                CategoryDetailSheet(store: store, category: category, month: month)
+            }
+        case .report:
+            if let report {
+                ImportReportSheet(report: report) {
+                    self.sheet = nil
+                    Task {
+                        try? await Task.sleep(for: .seconds(0.4))
+                        self.sheet = .inbox
+                    }
+                }
+            }
         }
     }
 
@@ -366,21 +523,15 @@ struct HomeScreen: View {
     /// oder über einen Kurzbefehl im Hintergrund.
     private func takeOff() {
         guard let saved = store.lastSaved else { return }
-        // Der Monat der Buchung, damit man sie auch sieht, wenn man gerade woanders steht.
         if saved.month != month { month = saved.month }
 
         let next = Flight(
             text: MoneyFormat.signed(saved.signedAmount),
             tint: saved.direction == .income ? Palette.positive : Palette.ink)
 
-        // Kam die Buchung aus dem Blatt, wartet die Bestätigung, bis es zu ist.
-        // Kam sie aus einem Kurzbefehl im Hintergrund, steigt sie sofort auf.
         if sheet == nil { flight = next } else { pendingFlight = next }
     }
 
-    /// Holt ab, was der Kurzbefehl hinterlegt hat. Wird zweimal versucht — beim
-    /// Erscheinen (Kaltstart: der Kurzbefehl war schneller als die Oberfläche) und
-    /// bei jeder weiteren Anforderung (App lief schon).
     private func openRequestedEntry() {
         guard let direction = router.consume() else { return }
         page = 0
@@ -392,9 +543,7 @@ struct HomeScreen: View {
     }
 }
 
-/// Der Knopf zur zweiten Seite: die Farben der eigenen Kategorien als Raster. Ein
-/// Zahnrad wäre eine Einstellung — hier liegen aber die Kategorien, und die haben
-/// eine Farbe, an der man sie wiedererkennt.
+/// Der Knopf zur zweiten Seite: die Farben der eigenen Kategorien als Raster.
 private struct CategoriesGlyph: View {
     let categories: [BudgetCategory]
 
@@ -412,13 +561,11 @@ private struct CategoriesGlyph: View {
             }
         }
         .frame(width: 34, height: 34)
-        .background(Circle().fill(Palette.raised))
+        .glassCapsule(interactive: true)
     }
 }
 
-/// Eine der beiden Summen. Das Zeichen links ist der Ring selbst im Kleinen: außen
-/// dick für Ausgaben, innen dünn für Einnahmen — damit klar ist, welche Summe zu
-/// welchem Ring gehört, ohne ein Wort darüber zu verlieren.
+/// Eine der drei Summen. Das Zeichen links ist der Ring selbst im Kleinen.
 private struct TotalSegment: View {
     let direction: Direction
     let total: Decimal
@@ -428,15 +575,17 @@ private struct TotalSegment: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 9) {
+            HStack(spacing: 7) {
                 RingGlyph(direction: direction, isActive: isActive)
 
                 VStack(alignment: .leading, spacing: 0) {
                     Text(direction.plural)
-                        .font(.caption2)
+                        .font(.system(size: 10))
                         .foregroundStyle(isActive ? Palette.muted : Palette.faint)
-                    Text(MoneyFormat.hero(total))
-                        .font(.system(size: 18, weight: .semibold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                    Text(MoneyFormat.rounded(total))
+                        .font(.system(size: 15, weight: .semibold))
                         .monospacedDigit()
                         .contentTransition(.numericText())
                         .foregroundStyle(isActive ? Palette.ink : Palette.muted)
@@ -445,8 +594,8 @@ private struct TotalSegment: View {
                 }
                 Spacer(minLength: 0)
             }
-            .padding(.vertical, 11)
-            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .padding(.horizontal, 10)
             .frame(maxWidth: .infinity)
             .background {
                 if isActive {
@@ -475,7 +624,10 @@ private struct RingGlyph: View {
                 .frame(width: 22, height: 22)
             Circle()
                 .strokeBorder(direction == .income ? ink : Palette.track, lineWidth: 2)
-                .frame(width: 11, height: 11)
+                .frame(width: 13, height: 13)
+            Circle()
+                .fill(direction == .invest ? ink : Palette.track)
+                .frame(width: 5, height: 5)
         }
         .accessibilityHidden(true)
     }

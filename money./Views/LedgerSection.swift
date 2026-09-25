@@ -1,9 +1,9 @@
 // LedgerSection.swift
-// budget. — die Liste unter den Ringen
+// budget. — die Liste unter der Grafik
 //
 // Dieselbe Reihenfolge wie im Ring, dieselben Farben. Eine Zeile aufklappen zeigt
-// die einzelnen Buchungen dieser Kategorie in diesem Monat — das ist die tiefste
-// Ebene der App, und sie liegt auf derselben Seite.
+// die einzelnen Buchungen dieser Kategorie in diesem Monat. Darunter, wenn es sie
+// gibt, die Umbuchungen — als eigene kleine Zeile, weil sie nirgends mitzählen.
 
 import SwiftUI
 
@@ -11,28 +11,36 @@ struct LedgerSection: View {
     let store: AppStore
     let ring: RingSummary
     let month: YearMonth
+    var transferTotal: Decimal = 0
+    var transferCount: Int = 0
     @Binding var selection: RingSelection?
     @Binding var expanded: UUID?
     let onEdit: (Entry) -> Void
+    var onRecategorize: (Entry) -> Void = { _ in }
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var showsTransfers = false
 
     var body: some View {
-        CardStack {
-            if ring.slices.isEmpty {
-                emptyRow
-            } else {
-                ForEach(Array(ring.slices.enumerated()), id: \.element.id) { index, slice in
-                    if index > 0 { RowDivider(inset: Metrics.cardPadding + 50) }
-                    row(slice)
-                    if expanded == slice.id {
-                        entryList(for: slice)
+        VStack(spacing: 12) {
+            CardStack {
+                if ring.slices.isEmpty {
+                    emptyRow
+                } else {
+                    ForEach(Array(ring.slices.enumerated()), id: \.element.id) { index, slice in
+                        if index > 0 { RowDivider(inset: Metrics.cardPadding + 50) }
+                        row(slice)
+                        if expanded == slice.id {
+                            entryList(for: slice)
+                        }
                     }
                 }
             }
+            if transferCount > 0 { transfersRow }
         }
         .animation(motion, value: expanded)
         .animation(motion, value: ring)
+        .animation(motion, value: showsTransfers)
     }
 
     private var emptyRow: some View {
@@ -64,8 +72,6 @@ struct LedgerSection: View {
                             .minimumScaleFactor(0.8)
                         CountChip(count: slice.count)
                     }
-                    // Der Name gibt als Letztes nach: Zahlen kann man kürzen, einen
-                    // abgeschnittenen Kategorienamen kann man nicht lesen.
                     .layoutPriority(1)
 
                     Spacer(minLength: 6)
@@ -84,15 +90,11 @@ struct LedgerSection: View {
                         .frame(width: 42, alignment: .trailing)
                 }
 
-                // Der Balken bekommt eine eigene Ebene, statt in der Zeile um Platz
-                // zu konkurrieren — sonst drängt er die Beträge aus dem Bild.
                 shareBar(slice)
                     .padding(.leading, 50)
             }
             .padding(.horizontal, Metrics.cardPadding)
             .padding(.vertical, 12)
-            // Die ausgewählte Zeile trägt einen Hauch ihrer eigenen Farbe. Damit
-            // schließt sich der Kreis zum Ring: dort leuchtet dasselbe Segment.
             .background(
                 Palette.tint(slice.category.tint).opacity(isSelected ? 0.09 : 0))
             .contentShape(Rectangle())
@@ -104,11 +106,6 @@ struct LedgerSection: View {
         .accessibilityHint(expanded == slice.id ? "Buchungen ausblenden" : "Buchungen anzeigen")
     }
 
-    /// Der Anteil als Strich in der Kategorienfarbe.
-    ///
-    /// Die Prozentzahl daneben sagt dasselbe, aber man muss sie lesen. Der Strich
-    /// macht aus der Liste ein Bild: Man sieht die Rangfolge, ohne eine einzige Zahl
-    /// anzusehen — und es ist dieselbe Farbe wie im Ring darüber.
     private func shareBar(_ slice: Slice) -> some View {
         GeometryReader { proxy in
             ZStack(alignment: .leading) {
@@ -132,8 +129,6 @@ struct LedgerSection: View {
             }
         }
         .padding(.bottom, 6)
-        // Derselbe Farbhauch wie in der Zeile darüber: Aufgeklapptes gehört sichtbar
-        // zu der Kategorie, aus der es kommt.
         .background(Palette.raised.opacity(0.5))
         .background(Palette.tint(slice.category.tint).opacity(0.05))
         .transition(.opacity.combined(with: .move(edge: .top)))
@@ -141,18 +136,19 @@ struct LedgerSection: View {
 
     private func entryRow(_ entry: Entry, tint: Color) -> some View {
         HStack(spacing: 12) {
-            // Ein kurzer Strich in der Kategorienfarbe statt einer zweiten Kachel —
-            // die Zugehörigkeit ist schon klar, sie braucht nur eine Spur.
             Capsule()
                 .fill(tint)
                 .frame(width: 3, height: 22)
 
             VStack(alignment: .leading, spacing: 1) {
-                Text(MoneyFormat.day(entry.date))
-                    .font(.subheadline)
-                    .foregroundStyle(Palette.ink)
-                if !entry.note.isEmpty {
-                    Text(entry.note)
+                HStack(spacing: 6) {
+                    Text(MoneyFormat.day(entry.date))
+                        .font(.subheadline)
+                        .foregroundStyle(Palette.ink)
+                    EntryMarks(entry: entry)
+                }
+                if !entry.title.isEmpty {
+                    Text(entry.title)
                         .font(.caption)
                         .foregroundStyle(Palette.muted)
                         .lineLimit(1)
@@ -161,14 +157,24 @@ struct LedgerSection: View {
 
             Spacer(minLength: 8)
 
-            Text(MoneyFormat.amount(entry.amount))
+            Text((entry.kind == .refund ? "+" : "") + MoneyFormat.amount(entry.amount))
                 .font(.subheadline)
                 .monospacedDigit()
-                .foregroundStyle(Palette.muted)
+                .foregroundStyle(entry.kind == .refund ? Palette.positive : Palette.muted)
 
             Menu {
-                Button { onEdit(entry) } label: {
-                    Label("Bearbeiten", systemImage: "pencil")
+                if entry.source == .manual {
+                    Button { onEdit(entry) } label: {
+                        Label("Bearbeiten", systemImage: "pencil")
+                    }
+                }
+                Button { onRecategorize(entry) } label: {
+                    Label("Kategorie ändern", systemImage: "tag")
+                }
+                if entry.source == .tradeRepublic {
+                    Button { store.reject(entry.id, as: .transfer) } label: {
+                        Label("Als Umbuchung", systemImage: "arrow.left.arrow.right")
+                    }
                 }
                 Button(role: .destructive) {
                     withAnimation(motion) { store.deleteEntry(entry.id) }
@@ -187,6 +193,88 @@ struct LedgerSection: View {
         .padding(.leading, Metrics.cardPadding + 6)
         .padding(.trailing, Metrics.cardPadding - 6)
         .padding(.vertical, 7)
+    }
+
+    // MARK: - Umbuchungen
+
+    private var transfers: [Entry] {
+        store.data.entries
+            .filter { $0.kind == .transfer && $0.month == month }
+            .sorted { ($0.date, $0.createdAt) > ($1.date, $1.createdAt) }
+    }
+
+    private var transfersRow: some View {
+        CardStack {
+            Button {
+                showsTransfers.toggle()
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "arrow.left.arrow.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Palette.faint)
+                        .frame(width: 38, height: 38)
+                        .background(Circle().fill(Palette.raised))
+                    Text("\(transferCount) Umbuchungen")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Palette.muted)
+                    Spacer()
+                    Text(MoneyFormat.hero(transferTotal))
+                        .font(.callout.weight(.semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(Palette.muted)
+                    Image(systemName: "chevron.down")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(Palette.faint)
+                        .rotationEffect(.degrees(showsTransfers ? 180 : 0))
+                }
+                .padding(.horizontal, Metrics.cardPadding)
+                .padding(.vertical, 10)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(PressableRowStyle())
+            .accessibilityHint("Zählen nirgends mit")
+
+            if showsTransfers {
+                VStack(spacing: 0) {
+                    ForEach(transfers) { entry in
+                        HStack(spacing: 10) {
+                            Text(MoneyFormat.day(entry.date))
+                                .font(.subheadline)
+                                .foregroundStyle(Palette.ink)
+                            Text(entry.title)
+                                .font(.caption)
+                                .foregroundStyle(Palette.muted)
+                                .lineLimit(1)
+                            Spacer(minLength: 6)
+                            Text(MoneyFormat.signed(entry.signedAmount))
+                                .font(.subheadline)
+                                .monospacedDigit()
+                                .foregroundStyle(Palette.muted)
+                            Menu {
+                                Button { onRecategorize(entry) } label: {
+                                    Label("Doch zählen — Kategorie wählen", systemImage: "tag")
+                                }
+                                Button(role: .destructive) { store.deleteEntry(entry.id) } label: {
+                                    Label("Löschen", systemImage: "trash")
+                                }
+                            } label: {
+                                Image(systemName: "ellipsis")
+                                    .font(.footnote.weight(.semibold))
+                                    .foregroundStyle(Palette.faint)
+                                    .frame(width: 30, height: 30)
+                                    .contentShape(Rectangle())
+                            }
+                        }
+                        .padding(.leading, Metrics.cardPadding + 6)
+                        .padding(.trailing, Metrics.cardPadding - 6)
+                        .padding(.vertical, 6)
+                    }
+                }
+                .padding(.bottom, 6)
+                .background(Palette.raised.opacity(0.5))
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
     }
 
     // MARK: - Ablauf
@@ -221,6 +309,7 @@ struct CountChip: View {
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
             .background(Capsule().fill(Palette.raised))
+            .fixedSize()
             .accessibilityHidden(true)
     }
 }

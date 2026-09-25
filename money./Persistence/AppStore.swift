@@ -121,17 +121,105 @@ final class AppStore {
     // MARK: - Posteingang
 
     /// Den Vorschlag annehmen, wie er ist.
-    func accept(_ id: UUID) {
-        guard let index = data.entries.firstIndex(where: { $0.id == id }),
-              data.entries[index].status == .proposed else { return }
-        var entry = data.entries[index]
-        entry.status = .confirmed
-        entry.suggestion?.decision = .accepted
-        data.entries[index] = entry
-        data.lastUsed[entry.direction.rawValue] = entry.categoryID
-        if entry.kind != .transfer { data.memory.confirm(entry.signals, as: entry.categoryID) }
-        settleRefunds(of: entry.id, to: entry.categoryID)
+    func accept(_ id: UUID) { accept([id]) }
+
+    func accept(_ ids: [UUID]) {
+        var first = true
+        for id in ids {
+            guard let index = data.entries.firstIndex(where: { $0.id == id }),
+                  data.entries[index].status == .proposed else { continue }
+            var entry = data.entries[index]
+            entry.status = .confirmed
+            entry.suggestion?.decision = .accepted
+            data.entries[index] = entry
+            data.lastUsed[entry.direction.rawValue] = entry.categoryID
+            if entry.kind != .transfer {
+                data.memory.confirm(learnable(entry, fully: first), as: entry.categoryID)
+            }
+            settleRefunds(of: entry.id, to: entry.categoryID)
+            first = false
+        }
+        rerankProposals()
         persist()
+    }
+
+    /// Eine Entscheidung über eine Gruppe ist *eine* Entscheidung über Wörter, MCC
+    /// und Typ — sonst würde ein Händler mit 200 Zeilen die Vorbelegung für alle
+    /// anderen Supermärkte allein bestimmen. Der Händler selbst darf voll zählen.
+    private func learnable(_ entry: Entry, fully: Bool) -> Signals {
+        var signals = entry.signals
+        if !fully {
+            signals.tokens = []
+            signals.mcc = nil
+            signals.importType = nil
+        }
+        return signals
+    }
+
+    /// Eine andere Kategorie als vorgeschlagen — für Vorschläge wie für Gebuchtes.
+    func correct(_ id: UUID, to category: UUID) { correct([id], to: category) }
+
+    func correct(_ ids: [UUID], to category: UUID) {
+        guard let chosen = data.category(category) else { return }
+        var first = true
+        for id in ids {
+            guard let index = data.entries.firstIndex(where: { $0.id == id }) else { continue }
+            var entry = data.entries[index]
+            let proposed = entry.suggestion?.categoryID ?? entry.categoryID
+            entry.categoryID = chosen.id
+            entry.direction = chosen.direction
+            entry.kind = entry.kind == .transfer ? .flow : entry.kind
+            entry.status = .confirmed
+            entry.suggestion?.decision = proposed == chosen.id ? .accepted : .corrected(chosen.id)
+            data.entries[index] = entry
+            data.lastUsed[entry.direction.rawValue] = chosen.id
+            data.memory.correct(learnable(entry, fully: first), from: proposed, to: chosen.id)
+            settleRefunds(of: entry.id, to: chosen.id)
+            first = false
+        }
+        rerankProposals()
+        persist()
+    }
+
+    enum Rejection { case transfer, delete }
+
+    /// „Das gehört nicht rein": als Umbuchung behalten oder verwerfen.
+    func reject(_ id: UUID, as rejection: Rejection) { reject([id], as: rejection) }
+
+    func reject(_ ids: [UUID], as rejection: Rejection) {
+        var first = true
+        for id in ids {
+            guard let index = data.entries.firstIndex(where: { $0.id == id }) else { continue }
+            var entry = data.entries[index]
+            if let proposed = entry.suggestion?.categoryID {
+                data.memory.reject(learnable(entry, fully: first), as: proposed)
+            }
+            first = false
+            switch rejection {
+            case .transfer:
+                entry.kind = .transfer
+                entry.status = .confirmed
+                entry.categoryID = BudgetCategory.noneID
+                entry.refundOf = nil
+                entry.suggestion?.decision = .rejected
+                data.entries[index] = entry
+            case .delete:
+                if let external = entry.externalID { data.ignoredExternalIDs.append(external) }
+                data.entries.remove(at: index)
+            }
+        }
+        rerankProposals()
+        persist()
+    }
+
+    /// Alle Vorschläge annehmen, bei denen die Maschine nicht unsicher war.
+    @discardableResult
+    func acceptAllConfident() -> Int {
+        let ids = data.proposals
+            .filter { ($0.suggestion?.band ?? .unsure) != .unsure }
+            .map(\.id)
+        accept(ids)
+        return ids.count
     }
 
     /// Erstattungen, die an dieser Buchung hängen, übernehmen ihre Entscheidung.
@@ -142,56 +230,30 @@ final class AppStore {
         }
     }
 
-    /// Eine andere Kategorie als vorgeschlagen — für Vorschläge wie für Gebuchtes.
-    func correct(_ id: UUID, to category: UUID) {
-        guard let index = data.entries.firstIndex(where: { $0.id == id }),
-              let chosen = data.category(category) else { return }
-        var entry = data.entries[index]
-        let proposed = entry.suggestion?.categoryID ?? entry.categoryID
-        entry.categoryID = chosen.id
-        entry.direction = chosen.direction
-        entry.kind = entry.kind == .transfer ? .flow : entry.kind
-        entry.status = .confirmed
-        entry.suggestion?.decision = proposed == chosen.id ? .accepted : .corrected(chosen.id)
-        data.entries[index] = entry
-        data.lastUsed[entry.direction.rawValue] = chosen.id
-        data.memory.correct(entry.signals, from: proposed, to: chosen.id)
-        settleRefunds(of: entry.id, to: chosen.id)
-        persist()
-    }
-
-    enum Rejection { case transfer, delete }
-
-    /// „Das gehört nicht rein": als Umbuchung behalten oder verwerfen.
-    func reject(_ id: UUID, as rejection: Rejection) {
-        guard let index = data.entries.firstIndex(where: { $0.id == id }) else { return }
-        var entry = data.entries[index]
-        if let proposed = entry.suggestion?.categoryID {
-            data.memory.reject(entry.signals, as: proposed)
+    /// Das Lernen wirkt sofort: Nach jeder Entscheidung werden die offenen Vorschläge
+    /// neu bewertet. Wer EDEKA zweimal bestätigt hat, sieht die restlichen
+    /// EDEKA-Zeilen von selbst aus dem Posteingang verschwinden.
+    private func rerankProposals() {
+        let history = HistoryIndex(data.entries)
+        for i in data.entries.indices {
+            let draft = data.entries[i]
+            guard draft.status == .proposed, draft.kind != .transfer, draft.refundOf == nil,
+                  draft.source == .tradeRepublic,
+                  let ranking = SuggestionEngine.rank(
+                      draft, categories: data.categories, memory: data.memory,
+                      lastUsed: data.lastUsed[draft.direction.rawValue], history: history)
+            else { continue }
+            var suggestion = ranking.suggestion
+            if draft.kind == .refund {
+                suggestion.evidence.insert(
+                    Evidence(kind: .refund, text: "Erstattung ohne passende Ausgabe", strength: 0), at: 0)
+            }
+            data.entries[i].categoryID = suggestion.categoryID
+            data.entries[i].suggestion = suggestion
+            if draft.kind == .flow, ranking.autoEligible, suggestion.confidence >= data.autoThreshold {
+                data.entries[i].status = .autoBooked
+            }
         }
-        switch rejection {
-        case .transfer:
-            entry.kind = .transfer
-            entry.status = .confirmed
-            entry.categoryID = BudgetCategory.noneID
-            entry.refundOf = nil
-            entry.suggestion?.decision = .rejected
-            data.entries[index] = entry
-        case .delete:
-            if let external = entry.externalID { data.ignoredExternalIDs.append(external) }
-            data.entries.remove(at: index)
-        }
-        persist()
-    }
-
-    /// Alle Vorschläge annehmen, bei denen die Maschine nicht unsicher war.
-    @discardableResult
-    func acceptAllConfident() -> Int {
-        let ids = data.proposals
-            .filter { ($0.suggestion?.band ?? .unsure) != .unsure }
-            .map(\.id)
-        for id in ids { accept(id) }
-        return ids.count
     }
 
     // MARK: - Import

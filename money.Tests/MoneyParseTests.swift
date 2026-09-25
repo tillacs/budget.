@@ -82,34 +82,7 @@ struct AmountAndNoteTests {
     }
 }
 
-/// Der Betrag aus einer Zahlungsmail. Geraten wird nur neben einem Währungszeichen —
-/// sonst liest sich ein Datum als Betrag.
-struct AmountInTextTests {
-    @Test func findetDenBetragNebenDerWährung() {
-        #expect(MoneyFormat.firstAmount(in: "Du hast 12,50 € an REWE gesendet")
-            == Decimal(string: "12.5"))
-        #expect(MoneyFormat.firstAmount(in: "Betrag: EUR 1.234,56 abgebucht")
-            == Decimal(string: "1234.56"))
-        #expect(MoneyFormat.firstAmount(in: "€9.99 Netflix") == Decimal(string: "9.99"))
-    }
-
-    /// Der Grund für die Währungs-Regel: Ein Datum ist kein Betrag.
-    @Test func hältDatenUndNummernFürKeineBeträge() {
-        #expect(MoneyFormat.firstAmount(in: "Bestellung 12345 vom 03.09.") == nil)
-        #expect(MoneyFormat.firstAmount(in: "Sendungsnummer 1.234") == nil)
-    }
-}
-
 struct MerchantKeyTests {
-    @Test func erkenntDenHändlerNachEinerPräposition() {
-        #expect(MerchantKey.guess(in: "Du hast 12,50 € an REWE gesendet") == "REWE")
-        #expect(MerchantKey.guess(in: "Zahlung bei Netflix International") == "Netflix International")
-    }
-
-    @Test func rätNichtWennNichtsDasteht() {
-        #expect(MerchantKey.guess(in: "12,50 € abgebucht") == nil)
-    }
-
     /// Groß- und Kleinschreibung dürfen nicht zwei Einträge aus einem Händler machen.
     @Test func normalisiertAufEinenSchlüssel() {
         #expect(MerchantKey.normalized(" rewe ") == MerchantKey.normalized("REWE"))
