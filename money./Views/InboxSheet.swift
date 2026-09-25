@@ -406,7 +406,11 @@ private struct InboxRow: View {
                 .padding(.vertical, 2)
             }
         }
-        .scrollClipDisabled()
+        // Bis an die Kartenkante scrollen, aber nie darüber hinaus: Der Rand der
+        // Karte ist auch der Rand der Reihe.
+        .contentMargins(.horizontal, Metrics.cardPadding, for: .scrollContent)
+        .padding(.horizontal, -Metrics.cardPadding)
+        .clipped()
         .transition(.opacity.combined(with: .move(edge: .top)))
     }
 }
