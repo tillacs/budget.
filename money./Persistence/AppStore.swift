@@ -442,32 +442,34 @@ final class AppStore {
         persist()
     }
 
-    /// Löschen nimmt Buchungen von Hand mit. Importierte Buchungen wandern stattdessen
-    /// in den Posteingang: Ihr Geld ist real, es braucht nur eine neue Kategorie.
-    func deleteCategory(_ id: UUID) {
-        data.categories.removeAll { $0.id == id }
-        var kept: [Entry] = []
-        for var entry in data.entries {
-            guard entry.categoryID == id else { kept.append(entry); continue }
-            guard entry.source == .tradeRepublic else { continue }
-            entry.status = .proposed
-            entry.suggestion = nil
-            if let fallback = data.categories(for: entry.direction).first {
-                entry.categoryID = fallback.id
-                entry.suggestion = Suggestion(categoryID: fallback.id, confidence: 0,
-                                              evidence: [Evidence(kind: .lastUsed, text: "Kategorie gelöscht", strength: 0)])
-            } else {
-                entry.categoryID = BudgetCategory.noneID
+    /// Wie viele Buchungen an einer Kategorie hängen — auch Vorschläge.
+    func entryCount(in category: UUID) -> Int {
+        data.entries.filter { $0.categoryID == category }.count
+    }
+
+    /// Löschen nimmt nie Buchungen mit. Hängen welche an der Kategorie, wandern sie
+    /// alle auf einmal in die Zielkategorie — Richtung inklusive, Status bleibt.
+    /// Ohne Ziel wird nur eine leere Kategorie gelöscht.
+    @discardableResult
+    func deleteCategory(_ id: UUID, movingEntriesTo target: UUID? = nil) -> Bool {
+        let affected = data.entries.indices.filter { data.entries[$0].categoryID == id }
+        if !affected.isEmpty {
+            guard let target, target != id, let destination = data.category(target) else { return false }
+            for i in affected {
+                data.entries[i].categoryID = destination.id
+                if data.entries[i].kind != .transfer {
+                    data.entries[i].direction = destination.direction
+                }
             }
-            kept.append(entry)
         }
-        data.entries = kept
+        data.categories.removeAll { $0.id == id }
         for (direction, used) in data.lastUsed where used == id {
-            data.lastUsed[direction] = nil
+            data.lastUsed[direction] = target
         }
         // Eine Zuordnung auf eine gelöschte Kategorie würde stumm ins Leere zeigen.
         data.memory.forget(category: id)
         persist()
+        return true
     }
 
     func moveCategories(for direction: Direction, from source: IndexSet, to destination: Int) {

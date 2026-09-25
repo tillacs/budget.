@@ -20,8 +20,13 @@ struct CategoryEditorSheet: View {
     @State private var tint: CategoryTint = .azure
     @State private var currentDirection: Direction = .expense
     @State private var showsDeleteConfirmation = false
+    @State private var showsMovePicker = false
     @State private var prepared = false
     @FocusState private var nameFocused: Bool
+
+    private var entryCount: Int {
+        editing.map { store.entryCount(in: $0.id) } ?? 0
+    }
 
     private var canSave: Bool {
         !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -66,7 +71,7 @@ struct CategoryEditorSheet: View {
         .presentationDetents([.large])
         .task { prepare() }
         .confirmationDialog(
-            "\u{201E}\(name)\u{201C} mit allen Buchungen löschen?",
+            "\u{201E}\(name)\u{201C} löschen?",
             isPresented: $showsDeleteConfirmation, titleVisibility: .visible
         ) {
             Button("Löschen", role: .destructive) {
@@ -74,7 +79,19 @@ struct CategoryEditorSheet: View {
                 dismiss()
             }
         } message: {
-            Text("Die Buchungen dieser Kategorie verschwinden mit ihr. Das lässt sich nicht rückgängig machen.")
+            Text("Die Kategorie ist leer. Das lässt sich nicht rückgängig machen.")
+        }
+        // Mit Buchungen: erst das Ziel wählen, dann wird alles auf einmal umgebucht.
+        .sheet(isPresented: $showsMovePicker) {
+            if let editing {
+                CategoryPickerSheet(
+                    store: store, direction: editing.direction, current: nil, exclude: editing.id,
+                    title: "\(entryCount) Buchungen umbuchen nach …"
+                ) { target in
+                    store.deleteCategory(editing.id, movingEntriesTo: target)
+                    dismiss()
+                }
+            }
         }
     }
 
@@ -203,8 +220,10 @@ struct CategoryEditorSheet: View {
     }
 
     private var deleteButton: some View {
-        Button(role: .destructive) { showsDeleteConfirmation = true } label: {
-            Text("Kategorie löschen")
+        Button(role: .destructive) {
+            if entryCount > 0 { showsMovePicker = true } else { showsDeleteConfirmation = true }
+        } label: {
+            Text(entryCount > 0 ? "Löschen und \(entryCount) Buchungen umbuchen …" : "Kategorie löschen")
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(Palette.negative)
                 .frame(maxWidth: .infinity, minHeight: 48)

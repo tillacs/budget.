@@ -420,6 +420,9 @@ struct CategoryPickerSheet: View {
     let store: AppStore
     let direction: Direction
     let current: UUID?
+    /// Eine Kategorie, die nicht zur Wahl steht — die, die gerade gelöscht wird.
+    var exclude: UUID? = nil
+    var title: String = "Wohin?"
     let onPick: (UUID) -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -428,7 +431,7 @@ struct CategoryPickerSheet: View {
         NavigationStack {
             List {
                 ForEach(Direction.allCases, id: \.self) { candidate in
-                    let categories = store.data.categories(for: candidate)
+                    let categories = store.data.categories(for: candidate).filter { $0.id != exclude }
                     if !categories.isEmpty {
                         Section(candidate.plural) {
                             ForEach(categories) { category in
@@ -454,7 +457,7 @@ struct CategoryPickerSheet: View {
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
             .background(Palette.canvas)
-            .navigationTitle("Wohin?")
+            .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

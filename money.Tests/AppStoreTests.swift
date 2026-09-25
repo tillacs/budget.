@@ -31,18 +31,27 @@ struct AppStoreTests {
         #expect(store.data.preferredCategory(for: .expense)?.name == "Essen")
     }
 
-    @Test func löschenNimmtDieBuchungenMit() throws {
+    /// Löschen nimmt nie Buchungen mit: Sie werden alle auf einmal umgebucht.
+    @Test func löschenBuchtDieBuchungenUm() throws {
         let store = store()
         let essen = try category(store, "Essen")
         let wohnen = try category(store, "Wohnen")
+        let gehalt = try category(store, "Gehalt")
         store.add(Entry(amount: 10, direction: .expense, categoryID: essen.id))
         store.add(Entry(amount: 20, direction: .expense, categoryID: wohnen.id))
 
-        store.deleteCategory(essen.id)
+        // Ohne Ziel bleibt eine volle Kategorie stehen.
+        #expect(store.deleteCategory(essen.id) == false)
+        #expect(store.data.categories.contains { $0.id == essen.id })
 
-        #expect(store.data.entries.count == 1)
-        #expect(store.data.entries.first?.categoryID == wohnen.id)
+        #expect(store.deleteCategory(essen.id, movingEntriesTo: gehalt.id))
+        #expect(store.data.entries.count == 2)
+        let moved = try #require(store.data.entries.first { $0.amount == 10 })
+        #expect(moved.categoryID == gehalt.id)
+        #expect(moved.direction == .income)
+        #expect(!store.data.categories.contains { $0.id == essen.id })
         #expect(store.data.lastUsed["expense"] == wohnen.id)
+        #expect(store.entryCount(in: gehalt.id) == 1)
     }
 
     /// Dreht eine Kategorie die Seite, müssen ihre Buchungen mitgehen — sonst lägen
@@ -185,7 +194,8 @@ struct MerchantMemoryTests {
         let abos = try #require(store.data.categories.first { $0.name == "Abos" })
 
         store.add(Entry(amount: 12, direction: .expense, categoryID: abos.id), merchant: "Netflix")
-        store.deleteCategory(abos.id)
+        let essen = try #require(store.data.categories.first { $0.name == "Essen" })
+        store.deleteCategory(abos.id, movingEntriesTo: essen.id)
 
         #expect(store.rememberedCategory(forMerchant: "Netflix") == nil)
         #expect(store.data.memory.byMerchant.isEmpty)
