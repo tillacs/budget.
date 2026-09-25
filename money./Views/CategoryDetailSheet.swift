@@ -16,6 +16,7 @@ struct CategoryDetailSheet: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var expanded: String?
     @State private var pickerFor: Entry?
+    @State private var linkFor: Entry?
 
     private var tint: Color { Palette.tint(category.tint) }
     private var entries: [Entry] { store.entries(of: category.id, in: month) }
@@ -73,6 +74,9 @@ struct CategoryDetailSheet: View {
             CategoryPickerSheet(store: store, direction: entry.direction, current: entry.categoryID) {
                 store.correct(entry.id, to: $0)
             }
+        }
+        .sheet(item: $linkFor) { entry in
+            RefundLinkSheet(store: store, entry: entry)
         }
     }
 
@@ -193,6 +197,16 @@ struct CategoryDetailSheet: View {
                 .foregroundStyle(entry.kind == .refund ? Palette.positive : Palette.muted)
             Menu {
                 Button { pickerFor = entry } label: { Label("Kategorie ändern", systemImage: "tag") }
+                if entry.kind == .refund, entry.refundOf != nil {
+                    Button { store.unlinkRefund(entry.id) } label: {
+                        Label("Ausgleich lösen", systemImage: "arrow.uturn.forward")
+                    }
+                } else if entry.kind == .flow {
+                    Button { linkFor = entry } label: {
+                        Label(entry.direction == .income ? "Als Ausgleich zuordnen …" : "Ausgleich zuordnen …",
+                              systemImage: "arrow.uturn.backward")
+                    }
+                }
                 if entry.source == .tradeRepublic {
                     Button { store.reject(entry.id, as: .transfer) } label: {
                         Label("Als Umbuchung", systemImage: "arrow.left.arrow.right")

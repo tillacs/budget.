@@ -224,6 +224,11 @@ private struct InboxRow: View {
     private var tint: Color { category.map { Palette.tint($0.tint) } ?? Palette.faint }
     /// Ein Vorschlag ohne Grund ist keiner — dann steht „Wofür?" statt einer Kategorie.
     private var isGuess: Bool { entry.suggestion?.isGuess ?? true }
+    /// Ein Ausgleich: Das Geld senkt eine Ausgabe, statt Einnahme zu sein.
+    private var linkedOriginal: Entry? {
+        guard entry.kind == .refund, let id = entry.refundOf else { return nil }
+        return store.entry(id)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
@@ -297,7 +302,21 @@ private struct InboxRow: View {
     private var chipButton: some View {
         Button(action: onToggle) {
             HStack(spacing: 6) {
-                if isGuess {
+                if let original = linkedOriginal {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.uturn.backward")
+                            .font(.caption.weight(.bold))
+                        Text("Ausgleich: \(original.title.isEmpty ? (category?.name ?? "") : original.title)")
+                            .font(.caption.weight(.medium))
+                            .lineLimit(1)
+                    }
+                    .foregroundStyle(Palette.ink)
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 10)
+                    .glassCapsule(interactive: true, tint: tint.opacity(0.35))
+                    .overlay(Capsule().strokeBorder(tint, lineWidth: 1.5))
+                    ConfidenceDot(band: entry.suggestion?.band ?? .unsure, tint: tint)
+                } else if isGuess {
                     HStack(spacing: 6) {
                         Image(systemName: "questionmark")
                             .font(.caption.weight(.bold))
@@ -319,7 +338,9 @@ private struct InboxRow: View {
     }
 
     private var alternatives: some View {
-        let ids = (isGuess ? [] : [entry.categoryID]) + (entry.suggestion?.alternatives ?? [])
+        // Bei einem Ausgleich stehen als Alternativen die Einnahme-Kategorien:
+        // „nein, das war wirklich Geld für mich".
+        let ids = (isGuess || linkedOriginal != nil ? [] : [entry.categoryID]) + (entry.suggestion?.alternatives ?? [])
         let options = ids.compactMap { store.data.category($0) }
         return GlassEffectContainer(spacing: 8) {
             HStack(spacing: 8) {

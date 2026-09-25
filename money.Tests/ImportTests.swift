@@ -191,6 +191,39 @@ struct ImportPipelineTests {
         #expect(outcome.report.isBalanced)
     }
 
+    /// „35 € für Unterwegs ausgegeben, 35 € vom Vater bekommen": Der Eingang wird
+    /// als Ausgleich vorgeschlagen und senkt die Ausgabe, statt Einnahme zu sein.
+    @MainActor @Test func geldVonPersonWirdAlsAusgleichVorgeschlagen() throws {
+        var data = AppData.seeded()
+        let unterwegs = try category(data, "Unterwegs")
+        data.entries.append(Entry(
+            date: CalendarDate(year: 2026, month: 9, day: 10), amount: 35,
+            direction: .expense, categoryID: unterwegs.id, note: "Zugticket"))
+        let body = transfer("v1", "2026-09-12", "35.000000", "TRANSFER_INBOUND", "Person 1", iban: "DE11100000000000000000")
+        let outcome = ImportPipeline.run(rows: try rows(body), into: data)
+        let eingang = try #require(outcome.data.entries.first { $0.externalID == "v1" })
+        #expect(eingang.kind == .refund)
+        #expect(eingang.status == .proposed)
+        #expect(eingang.refundOf == data.entries[0].id)
+        #expect(eingang.suggestion?.isGuess == false)
+        #expect(outcome.report.isBalanced)
+
+        // Angenommen: Unterwegs steht bei null, Einnahmen bleiben leer.
+        let store = AppStore(data: outcome.data, file: DataFile(
+            fileURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("budget-ausgleich-\(UUID().uuidString).json")))
+        store.accept(eingang.id)
+        let summary = store.summary(for: YearMonth(year: 2026, month: 9))
+        #expect(summary.expenses.total == 0)
+        #expect(summary.income.total == 0)
+
+        // Gelöst: wieder ein offener Eingang, die Ausgabe zählt wieder.
+        store.unlinkRefund(eingang.id)
+        #expect(store.entry(eingang.id)?.kind == .flow)
+        #expect(store.entry(eingang.id)?.status == .proposed)
+        #expect(store.summary(for: YearMonth(year: 2026, month: 9)).expenses.total == 35)
+    }
+
     @Test func eigeneIBANZähltAuchOhneNamen() throws {
         var data = AppData.seeded()
         data.ownIBANs = ["DE12100110012625980979"]

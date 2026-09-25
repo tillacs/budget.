@@ -18,6 +18,7 @@ enum HomeSheet: Identifiable, Hashable {
     case inbox
     case detail(UUID)
     case report
+    case link(Entry)
 
     var id: String {
         switch self {
@@ -26,6 +27,7 @@ enum HomeSheet: Identifiable, Hashable {
         case .inbox: return "posteingang"
         case .detail(let id): return "detail-\(id)"
         case .report: return "bericht"
+        case .link(let entry): return "ausgleich-\(entry.id)"
         }
     }
 }
@@ -157,7 +159,8 @@ struct HomeScreen: View {
                         selection: $selection,
                         expanded: $expanded,
                         onEdit: { sheet = .edit($0) },
-                        onRecategorize: { pickerFor = $0 })
+                        onRecategorize: { pickerFor = $0 },
+                        onLink: { sheet = .link($0) })
                 }
                 .padding(.horizontal, Metrics.screenInset)
                 .padding(.top, 10)
@@ -494,6 +497,8 @@ struct HomeScreen: View {
             if let category = store.data.category(id) {
                 CategoryDetailSheet(store: store, category: category, month: month)
             }
+        case .link(let entry):
+            RefundLinkSheet(store: store, entry: entry)
         case .report:
             if let report {
                 ImportReportSheet(report: report) {

@@ -133,7 +133,8 @@ final class AppStore {
             entry.suggestion?.decision = .accepted
             data.entries[index] = entry
             data.lastUsed[entry.direction.rawValue] = entry.categoryID
-            if entry.kind != .transfer {
+            // Ein Ausgleich sagt nichts über die Kategorie der Person — nicht lernen.
+            if entry.kind != .transfer, entry.refundOf == nil {
                 data.memory.confirm(learnable(entry, fully: first), as: entry.categoryID)
             }
             settleRefunds(of: entry.id, to: entry.categoryID)
@@ -166,6 +167,14 @@ final class AppStore {
             guard let index = data.entries.firstIndex(where: { $0.id == id }) else { continue }
             var entry = data.entries[index]
             let proposed = entry.suggestion?.categoryID ?? entry.categoryID
+            // Eine vorgeschlagene Erstattung, die doch eine Einnahme ist: Verknüpfung
+            // lösen, ganz normal buchen.
+            if entry.kind == .refund, chosen.direction != entry.direction {
+                entry.kind = .flow
+                entry.refundOf = nil
+            } else if entry.kind == .refund, entry.refundOf != nil, chosen.id != entry.categoryID {
+                entry.refundOf = nil
+            }
             entry.categoryID = chosen.id
             entry.direction = chosen.direction
             entry.kind = entry.kind == .transfer ? .flow : entry.kind
@@ -179,6 +188,63 @@ final class AppStore {
         }
         rerankProposals()
         persist()
+    }
+
+    /// Eine eingegangene Buchung als Ausgleich einer Ausgabe verbuchen: Sie senkt
+    /// deren Kategorie, statt als Einnahme zu zählen.
+    func linkRefund(_ inboundID: UUID, to originalID: UUID) {
+        guard let i = data.entries.firstIndex(where: { $0.id == inboundID }),
+              let original = data.entries.first(where: { $0.id == originalID }),
+              original.kind == .flow, original.direction != .income else { return }
+        var entry = data.entries[i]
+        entry.kind = .refund
+        entry.direction = original.direction
+        entry.categoryID = original.categoryID
+        entry.refundOf = original.id
+        entry.status = .confirmed
+        entry.suggestion?.decision = .accepted
+        data.entries[i] = entry
+        persist()
+    }
+
+    /// Den Ausgleich wieder lösen: Die Buchung wird zur offenen Einnahme.
+    func unlinkRefund(_ id: UUID) {
+        guard let i = data.entries.firstIndex(where: { $0.id == id }),
+              data.entries[i].kind == .refund, data.entries[i].refundOf != nil else { return }
+        var entry = data.entries[i]
+        entry.kind = .flow
+        entry.direction = .income
+        entry.refundOf = nil
+        entry.status = .proposed
+        entry.categoryID = data.categories(for: .income).first?.id ?? BudgetCategory.noneID
+        entry.suggestion = Suggestion(categoryID: entry.categoryID, confidence: 0)
+        data.entries[i] = entry
+        rerankProposals()
+        persist()
+    }
+
+    /// Kandidaten für einen Ausgleich: zu einer Einnahme die Ausgaben der letzten
+    /// 90 Tage, zu einer Ausgabe die Eingänge der 90 Tage danach. Exakte Beträge zuerst.
+    func refundCandidates(for entry: Entry) -> [Entry] {
+        let taken = Set(data.entries.compactMap(\.refundOf))
+        let pool = data.entries.filter { other in
+            guard other.id != entry.id, other.kind == .flow, other.status != .proposed || other.source == .tradeRepublic
+            else { return false }
+            if entry.direction == .income {
+                return other.direction != .income && !taken.contains(other.id)
+                    && other.date <= entry.date
+                    && SuggestionEngine.daysBetween(other.date, entry.date) <= 90
+            } else {
+                return other.direction == .income && other.refundOf == nil
+                    && other.date >= entry.date
+                    && SuggestionEngine.daysBetween(entry.date, other.date) <= 90
+            }
+        }
+        return pool.sorted { a, b in
+            let ea = a.amount == entry.amount, eb = b.amount == entry.amount
+            if ea != eb { return ea }
+            return (a.date, a.createdAt) > (b.date, b.createdAt)
+        }
     }
 
     enum Rejection { case transfer, delete }

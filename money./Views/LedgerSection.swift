@@ -17,6 +17,7 @@ struct LedgerSection: View {
     @Binding var expanded: UUID?
     let onEdit: (Entry) -> Void
     var onRecategorize: (Entry) -> Void = { _ in }
+    var onLink: (Entry) -> Void = { _ in }
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showsTransfers = false
@@ -170,6 +171,16 @@ struct LedgerSection: View {
                 }
                 Button { onRecategorize(entry) } label: {
                     Label("Kategorie ändern", systemImage: "tag")
+                }
+                if entry.kind == .refund, entry.refundOf != nil {
+                    Button { store.unlinkRefund(entry.id) } label: {
+                        Label("Ausgleich lösen", systemImage: "arrow.uturn.forward")
+                    }
+                } else if entry.kind == .flow {
+                    Button { onLink(entry) } label: {
+                        Label(entry.direction == .income ? "Als Ausgleich zuordnen …" : "Ausgleich zuordnen …",
+                              systemImage: "arrow.uturn.backward")
+                    }
                 }
                 if entry.source == .tradeRepublic {
                     Button { store.reject(entry.id, as: .transfer) } label: {

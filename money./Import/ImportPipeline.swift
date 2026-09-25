@@ -171,6 +171,28 @@ nonisolated enum ImportPipeline {
                 }
             }
 
+            // Regel 6: Geld von einer Person, das genau zu einer Ausgabe passt, ist
+            // vermutlich deren Ausgleich — „du hast bezahlt, er schickt es zurück".
+            // Nur ein Vorschlag: gleicher Betrag ist ein Hinweis, kein Beweis.
+            if shape.kind == .flow, draft.direction == .income, shape.isPersonal,
+               let original = reimbursementTarget(for: draft, in: data) {
+                draft.kind = .refund
+                draft.direction = .expense
+                draft.categoryID = original.categoryID
+                draft.refundOf = original.id
+                draft.status = .proposed
+                draft.suggestion = Suggestion(
+                    categoryID: original.categoryID, confidence: 0.7,
+                    alternatives: data.categories(for: .income).prefix(2).map(\.id),
+                    evidence: [Evidence(
+                        kind: .refund,
+                        text: "gleicher Betrag wie \(original.title.isEmpty ? MoneyFormat.amount(original.amount) : original.title) vom \(MoneyFormat.day(original.date))",
+                        strength: 0.7)])
+                append(draft)
+                report.proposed += 1
+                continue
+            }
+
             // Saveback-Kauf: die Kategorie „Saveback" im Depot, nicht „Sparplan".
             if savebackBuys[row.transactionID] != nil {
                 draft.importType = "BUY_SAVEBACK"
@@ -247,6 +269,8 @@ nonisolated enum ImportPipeline {
         var merchant: String?
         var importType: String
         var isOwnTransfer = false
+        /// Geld von oder an eine Person (Überweisung, PayPal-Freunde) — kein Händler.
+        var isPersonal = false
     }
 
     static func classify(_ row: Row, amount: Decimal, data: AppData) -> Shape {
@@ -273,6 +297,7 @@ nonisolated enum ImportPipeline {
             var shape = Shape(direction: inflow ? .income : .expense, kind: .flow,
                               merchant: counterparty, importType: row.type)
             shape.isOwnTransfer = isOwn(row, counterparty: counterparty, data: data)
+            shape.isPersonal = true
             return shape
         case "TRANSFER_OUTBOUND", "TRANSFER_INSTANT_OUTBOUND":
             var shape = Shape(direction: inflow ? .income : .expense, kind: .flow,
@@ -309,6 +334,20 @@ nonisolated enum ImportPipeline {
         let wanted = MerchantKey.tokens(owner)
         let found = Set(MerchantKey.tokens(counterparty))
         return !wanted.isEmpty && wanted.allSatisfy(found.contains)
+    }
+
+    /// Die Ausgabe, zu der Geld von einer Person passt: exakt derselbe Betrag,
+    /// innerhalb von 30 Tagen davor, noch ohne Ausgleich. Die jüngste gewinnt.
+    static func reimbursementTarget(for inbound: Entry, in data: AppData) -> Entry? {
+        let taken = Set(data.entries.compactMap(\.refundOf))
+        return data.entries.filter { original in
+            original.kind == .flow && original.direction == .expense
+                && original.amount == inbound.amount
+                && original.date <= inbound.date
+                && SuggestionEngine.daysBetween(original.date, inbound.date) <= 30
+                && !taken.contains(original.id)
+        }
+        .max { ($0.date, $0.createdAt) < ($1.date, $1.createdAt) }
     }
 
     /// Die Ausgabe, die eine Erstattung senkt: gleicher Händler, innerhalb von 90
