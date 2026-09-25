@@ -10,6 +10,7 @@
 // Erfasst wird über das Blatt, das der Kurzbefehl öffnet — oder über das Plus.
 
 import SwiftUI
+import UniformTypeIdentifiers
 
 enum HomeSheet: Identifiable, Hashable {
     case quickEntry(Direction)
@@ -43,6 +44,8 @@ struct HomeScreen: View {
     @State private var pendingFlight: Flight?
     @State private var report: ImportReport?
     @State private var pickerFor: Entry?
+    @State private var showsImporter = false
+    @State private var importError: String?
 
     private let router = QuickEntryRouter.shared
 
@@ -78,6 +81,23 @@ struct HomeScreen: View {
             CategoryPickerSheet(store: store, direction: entry.direction, current: entry.categoryID) {
                 store.correct(entry.id, to: $0)
             }
+        }
+        .fileImporter(
+            isPresented: $showsImporter,
+            allowedContentTypes: [.commaSeparatedText, .delimitedText, .plainText, .text]
+        ) { result in
+            do {
+                try store.importTradeRepublic(try ImportFile.read(try result.get()))
+            } catch {
+                importError = error.localizedDescription
+            }
+        }
+        .alert("Import nicht möglich", isPresented: Binding(
+            get: { importError != nil }, set: { if !$0 { importError = nil } })
+        ) {
+            Button("OK") { importError = nil }
+        } message: {
+            Text(importError ?? "")
         }
         .onChange(of: router.token) { openRequestedEntry() }
         .task { openRequestedEntry() }
@@ -443,6 +463,7 @@ struct HomeScreen: View {
         .padding(.trailing, Metrics.screenInset)
         .padding(.bottom, 26)
         .accessibilityLabel("Ausgabe erfassen")
+        .accessibilityHint("Gedrückt halten für Einnahme, Investition oder Export")
         .contextMenu {
             Button { sheet = .quickEntry(.expense) } label: {
                 Label("Ausgabe erfassen", systemImage: "arrow.down.left")
@@ -452,6 +473,10 @@ struct HomeScreen: View {
             }
             Button { sheet = .quickEntry(.invest) } label: {
                 Label("Investition erfassen", systemImage: "chart.line.uptrend.xyaxis")
+            }
+            Divider()
+            Button { showsImporter = true } label: {
+                Label("Export einlesen (CSV)", systemImage: "square.and.arrow.down")
             }
         }
     }
