@@ -114,6 +114,18 @@ nonisolated enum MoneyFormat {
         return date.formatted(.dateTime.day().month(.abbreviated))
     }
 
+    /// Mit Jahr, für Buchungen außerhalb des laufenden Monats: „12. März 2026".
+    static func dayLong(_ value: CalendarDate) -> String {
+        var components = DateComponents()
+        components.year = value.year
+        components.month = value.month
+        components.day = value.day
+        guard let date = Calendar(identifier: .gregorian).date(from: components) else {
+            return "\(value.day).\(value.month).\(value.year)"
+        }
+        return date.formatted(.dateTime.day().month(.abbreviated).year())
+    }
+
     private static func firstDay(of value: YearMonth) -> Date? {
         var components = DateComponents()
         components.year = value.year

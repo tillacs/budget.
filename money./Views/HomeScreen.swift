@@ -523,11 +523,23 @@ struct HomeScreen: View {
     /// oder über einen Kurzbefehl im Hintergrund.
     private func takeOff() {
         guard let saved = store.lastSaved else { return }
+        // Zum Monat und zur Seite der Buchung — sonst ist sie „nirgends".
         if saved.month != month { month = saved.month }
+        if saved.kind != .transfer, listDirection != saved.direction {
+            listDirection = saved.direction
+            selection = nil
+            expanded = nil
+        }
 
+        var text = MoneyFormat.signed(saved.signedAmount)
+        if saved.kind == .transfer {
+            text += " · Umbuchung"
+        } else if let category = store.data.category(saved.categoryID) {
+            text += " · \(category.symbol) \(category.name)"
+        }
         let next = Flight(
-            text: MoneyFormat.signed(saved.signedAmount),
-            tint: saved.direction == .income ? Palette.positive : Palette.ink)
+            text: text,
+            tint: saved.signedAmount > 0 ? Palette.positive : Palette.ink)
 
         if sheet == nil { flight = next } else { pendingFlight = next }
     }

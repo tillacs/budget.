@@ -128,7 +128,9 @@ final class AppStore {
     /// Den Vorschlag annehmen, wie er ist.
     func accept(_ id: UUID) { accept([id]) }
 
-    func accept(_ ids: [UUID]) {
+    /// `announce` lässt die Entscheidung in die Insel fliegen und die Übersicht zum
+    /// Monat der Buchung springen — sonst weiß man nicht, wohin sie gegangen ist.
+    func accept(_ ids: [UUID], announce: Bool = true) {
         var first = true
         for id in ids {
             guard let index = data.entries.firstIndex(where: { $0.id == id }),
@@ -145,6 +147,7 @@ final class AppStore {
             settleRefunds(of: entry.id, to: entry.categoryID)
             first = false
         }
+        if announce, let last = ids.last, let entry = entry(last) { mark(entry) }
         rerankProposals()
         persist()
     }
@@ -165,7 +168,7 @@ final class AppStore {
     /// Eine andere Kategorie als vorgeschlagen — für Vorschläge wie für Gebuchtes.
     func correct(_ id: UUID, to category: UUID) { correct([id], to: category) }
 
-    func correct(_ ids: [UUID], to category: UUID) {
+    func correct(_ ids: [UUID], to category: UUID, announce: Bool = true) {
         guard let chosen = data.category(category) else { return }
         var first = true
         for id in ids {
@@ -191,6 +194,7 @@ final class AppStore {
             settleRefunds(of: entry.id, to: chosen.id)
             first = false
         }
+        if announce, let last = ids.last, let entry = entry(last) { mark(entry) }
         rerankProposals()
         persist()
     }
@@ -209,6 +213,7 @@ final class AppStore {
         entry.status = .confirmed
         entry.suggestion?.decision = .accepted
         data.entries[i] = entry
+        mark(entry)
         persist()
     }
 
@@ -291,7 +296,7 @@ final class AppStore {
         let ids = data.proposals
             .filter { ($0.suggestion?.band ?? .unsure) != .unsure }
             .map(\.id)
-        accept(ids)
+        accept(ids, announce: false)
         return ids.count
     }
 

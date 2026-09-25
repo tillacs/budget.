@@ -274,7 +274,7 @@ private struct InboxRow: View {
             HStack(spacing: 8) {
                 chipButton
                 Spacer(minLength: 4)
-                Text(group.count > 1 ? "zuletzt \(MoneyFormat.day(entry.date))" : MoneyFormat.day(entry.date))
+                Text((group.count > 1 ? "zuletzt " : "") + dateLabel)
                     .font(.caption)
                     .foregroundStyle(Palette.faint)
             }
@@ -303,6 +303,12 @@ private struct InboxRow: View {
             RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous)
                 .strokeBorder(Palette.hairline, lineWidth: 1))
         .contentShape(Rectangle())
+    }
+
+    /// Außerhalb des laufenden Monats steht das Datum mit Jahr — damit klar ist, in
+    /// welchem Monat die Buchung nach der Entscheidung zu finden ist.
+    private var dateLabel: String {
+        entry.date.yearMonth == .current() ? MoneyFormat.day(entry.date) : MoneyFormat.dayLong(entry.date)
     }
 
     private var chipButton: some View {
