@@ -1,6 +1,13 @@
 # Konzept: budget. erfasst selbst
 
-Stand: 25.09.2026. Ziel der Überarbeitung: Buchungen kommen von allein aus PayPal und
+**Umsetzungsstand 25.09.2026:** Phasen 0 bis 3 sind gebaut — Schema 3, Maschine,
+Trade-Republic-Import mit Posteingang, Blasen, Detailansicht, Liquid Glass. Auf
+Wunsch bewusst zurückgestellt: der Mitteilungs-Kanal (A), der PayPal-Export (C) und
+PSD2 (D). PayPal läuft über die TR-Karte und steht damit ohnehin im Export.
+Deployment-Target ist iOS 26, weil auf dem Mac Xcode 26.6 mit SDK 26.5 liegt; auf
+einem iPhone mit iOS 27 läuft die App unverändert.
+
+Stand des Konzepts: 25.09.2026. Ziel der Überarbeitung: Buchungen kommen von allein aus PayPal und
 Trade Republic in die App, werden mit Konfidenz einer Kategorie zugeordnet, und die
 App lernt aus jeder Bestätigung, Korrektur und Ablehnung.
 
