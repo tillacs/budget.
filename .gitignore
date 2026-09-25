@@ -15,3 +15,7 @@ DerivedData/
 # Swift Package Manager
 .build/
 .swiftpm/
+
+# Echte Exporte enthalten Namen und IBANs — nie ins Repo
+/example_trasaction.csv
+/Transaktionsexport*.csv

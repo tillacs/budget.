@@ -3,6 +3,12 @@
 
 import Foundation
 
+nonisolated struct ImportStamp: Codable, Hashable, Sendable {
+    let date: Date
+    let rows: Int
+    let newestDate: CalendarDate
+}
+
 nonisolated struct AppData: Codable, Sendable {
     var schemaVersion: Int
     var entries: [Entry]
@@ -15,29 +21,54 @@ nonisolated struct AppData: Codable, Sendable {
     /// und es bleiben drei Ziffern bis zum Sichern.
     var lastUsed: [String: UUID]
 
-    /// Händler → Kategorie, vom Nutzer selbst gefüllt: Jede bestätigte Buchung, die
-    /// einen Händler oder eine Notiz nennt, legt hier ihre Kategorie ab. Beim nächsten
-    /// Mal steht sie im Vorschlag schon drin.
-    ///
-    /// Der Schlüssel ist der normalisierte Händler (siehe `MerchantKey`).
-    var merchantCategories: [String: UUID]
+    /// Was der Nutzer der App beigebracht hat — je Händler, Wort, MCC, Konto, Papier.
+    var memory: MerchantMemory
 
-    /// 1 war der CSV-Import mit Regeln und Klassifikator. Version 2 hat damit nichts
-    /// mehr gemeinsam; eine alte Datei wird nicht migriert, sondern verworfen.
-    static let currentSchemaVersion = 2
+    /// Der Kontoinhaber, damit Überweisungen an sich selbst als Umbuchung gelten.
+    var ownerName: String?
+    /// IBANs eigener Konten bei anderen Banken.
+    var ownIBANs: [String]
+    /// Ab dieser Konfidenz bucht die Maschine selbst. 1 heißt: nie.
+    var autoThreshold: Double
+    /// Exportzeilen ohne Geld (Split, Steueroptimierung) und ausdrücklich verworfene —
+    /// damit sie beim nächsten Import nicht wieder auftauchen.
+    var ignoredExternalIDs: [String]
+    var lastImport: ImportStamp?
+
+    /// 1 war der CSV-Import mit Regeln und Klassifikator. 2 die reine Erfassung von
+    /// Hand. 3 bringt den Import des Trade-Republic-Exports, drei Richtungen und das
+    /// Gedächtnis mit Zählungen. Eine 2er-Datei wird gelesen und ergänzt.
+    static let currentSchemaVersion = 3
 
     init(
         schemaVersion: Int = AppData.currentSchemaVersion,
         entries: [Entry] = [],
         categories: [BudgetCategory] = [],
         lastUsed: [String: UUID] = [:],
-        merchantCategories: [String: UUID] = [:]
+        memory: MerchantMemory = MerchantMemory(),
+        ownerName: String? = nil,
+        ownIBANs: [String] = [],
+        autoThreshold: Double = 0.9,
+        ignoredExternalIDs: [String] = [],
+        lastImport: ImportStamp? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.entries = entries
         self.categories = categories
         self.lastUsed = lastUsed
-        self.merchantCategories = merchantCategories
+        self.memory = memory
+        self.ownerName = ownerName
+        self.ownIBANs = ownIBANs
+        self.autoThreshold = autoThreshold
+        self.ignoredExternalIDs = ignoredExternalIDs
+        self.lastImport = lastImport
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion, entries, categories, lastUsed, memory
+        case ownerName, ownIBANs, autoThreshold, ignoredExternalIDs, lastImport
+        /// Nur zum Lesen von Schema 2.
+        case merchantCategories
     }
 
     /// Von Hand geschrieben, damit ein neues Feld keine bestehende Datei unlesbar macht.
@@ -47,22 +78,50 @@ nonisolated struct AppData: Codable, Sendable {
     /// wird deshalb mit `decodeIfPresent` gelesen und fällt sonst auf den Standard.
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion)
+        let version = try container.decodeIfPresent(Int.self, forKey: .schemaVersion)
             ?? AppData.currentSchemaVersion
 
-        // Schema 1 war der CSV-Import. Toleranz gegenüber fehlenden Feldern darf nicht
-        // dazu führen, dass so eine Datei als leere App durchgeht — sie wird abgelehnt
-        // und damit verworfen, statt den Nutzer vor eine App ohne Kategorien zu setzen.
-        guard schemaVersion >= 2 else {
+        // Schema 1 war der CSV-Import mit Klassifikator. Toleranz gegenüber fehlenden
+        // Feldern darf nicht dazu führen, dass so eine Datei als leere App durchgeht.
+        guard version >= 2 else {
             throw DecodingError.dataCorruptedError(
                 forKey: .schemaVersion, in: container,
-                debugDescription: "Schema \(schemaVersion) kennt diese App nicht mehr.")
+                debugDescription: "Schema \(version) kennt diese App nicht mehr.")
         }
+        schemaVersion = AppData.currentSchemaVersion
         entries = try container.decodeIfPresent([Entry].self, forKey: .entries) ?? []
         categories = try container.decodeIfPresent([BudgetCategory].self, forKey: .categories) ?? []
         lastUsed = try container.decodeIfPresent([String: UUID].self, forKey: .lastUsed) ?? [:]
-        merchantCategories = try container
-            .decodeIfPresent([String: UUID].self, forKey: .merchantCategories) ?? [:]
+        var memory = try container.decodeIfPresent(MerchantMemory.self, forKey: .memory) ?? MerchantMemory()
+        ownerName = try container.decodeIfPresent(String.self, forKey: .ownerName)
+        ownIBANs = try container.decodeIfPresent([String].self, forKey: .ownIBANs) ?? []
+        autoThreshold = try container.decodeIfPresent(Double.self, forKey: .autoThreshold) ?? 0.9
+        ignoredExternalIDs = try container.decodeIfPresent([String].self, forKey: .ignoredExternalIDs) ?? []
+        lastImport = try container.decodeIfPresent(ImportStamp.self, forKey: .lastImport)
+
+        // Schema 2: Händler → eine Kategorie. Wird zu einer Bestätigung je Händler.
+        if memory.isEmpty,
+           let old = try container.decodeIfPresent([String: UUID].self, forKey: .merchantCategories) {
+            let then = Date()
+            for (merchant, category) in old {
+                memory.confirm(Signals(merchantKey: merchant, tokens: MerchantKey.tokens(merchant)), as: category, at: then)
+            }
+        }
+        self.memory = memory
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(schemaVersion, forKey: .schemaVersion)
+        try c.encode(entries, forKey: .entries)
+        try c.encode(categories, forKey: .categories)
+        try c.encode(lastUsed, forKey: .lastUsed)
+        try c.encode(memory, forKey: .memory)
+        try c.encodeIfPresent(ownerName, forKey: .ownerName)
+        try c.encode(ownIBANs, forKey: .ownIBANs)
+        try c.encode(autoThreshold, forKey: .autoThreshold)
+        try c.encode(ignoredExternalIDs, forKey: .ignoredExternalIDs)
+        try c.encodeIfPresent(lastImport, forKey: .lastImport)
     }
 
     static func seeded() -> AppData {
@@ -80,11 +139,10 @@ nonisolated struct AppData: Codable, Sendable {
         return categories.first { $0.id == id }
     }
 
-    /// Die Kategorie, die für diesen Händler zuletzt bestätigt wurde — sofern es sie
-    /// noch gibt.
+    /// Die Kategorie, die für diesen Händler am häufigsten bestätigt wurde — sofern
+    /// es sie noch gibt.
     func rememberedCategory(forMerchant merchant: String) -> BudgetCategory? {
-        guard let key = MerchantKey.normalized(merchant) else { return nil }
-        return category(merchantCategories[key])
+        category(memory.topCategory(forMerchant: merchant))
     }
 
     /// Vorauswahl für die Schnellerfassung: zuletzt benutzt, sonst die erste Kategorie
@@ -94,5 +152,11 @@ nonisolated struct AppData: Codable, Sendable {
             return stored
         }
         return categories(for: direction).first
+    }
+
+    /// Was im Posteingang wartet, neueste zuerst.
+    var proposals: [Entry] {
+        entries.filter { $0.status == .proposed }
+            .sorted { ($0.date, $0.createdAt) > ($1.date, $1.createdAt) }
     }
 }

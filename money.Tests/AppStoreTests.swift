@@ -188,7 +188,7 @@ struct MerchantMemoryTests {
         store.deleteCategory(abos.id)
 
         #expect(store.rememberedCategory(forMerchant: "Netflix") == nil)
-        #expect(store.data.merchantCategories.isEmpty)
+        #expect(store.data.memory.byMerchant.isEmpty)
     }
 
     /// Ein neues Feld darf keine bestehende Datei unlesbar machen — sonst stünde der
@@ -204,7 +204,7 @@ struct MerchantMemoryTests {
         try Data(alt.utf8).write(to: file.fileURL)
 
         let loaded = try #require(try file.load())
-        #expect(loaded.merchantCategories.isEmpty)
-        #expect(loaded.schemaVersion == 2)
+        #expect(loaded.memory.isEmpty)
+        #expect(loaded.schemaVersion == AppData.currentSchemaVersion)
     }
 }
