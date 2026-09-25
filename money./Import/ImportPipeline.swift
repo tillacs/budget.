@@ -181,13 +181,15 @@ nonisolated enum ImportPipeline {
                 draft.categoryID = original.categoryID
                 draft.refundOf = original.id
                 draft.status = .proposed
+                // Bewusst unter der Schwelle für „sichere annehmen": Ein gleicher Betrag
+                // kann Zufall sein, darüber entscheidet der Nutzer Zeile für Zeile.
                 draft.suggestion = Suggestion(
-                    categoryID: original.categoryID, confidence: 0.7,
+                    categoryID: original.categoryID, confidence: 0.55,
                     alternatives: data.categories(for: .income).prefix(2).map(\.id),
                     evidence: [Evidence(
                         kind: .refund,
                         text: "gleicher Betrag wie \(original.title.isEmpty ? MoneyFormat.amount(original.amount) : original.title) vom \(MoneyFormat.day(original.date))",
-                        strength: 0.7)])
+                        strength: 0.55)])
                 append(draft)
                 report.proposed += 1
                 continue
