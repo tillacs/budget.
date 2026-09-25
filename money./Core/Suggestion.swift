@@ -44,6 +44,10 @@ nonisolated struct Suggestion: Codable, Hashable, Sendable {
         self.decision = decision
     }
 
+    /// Ein Vorschlag ohne einen einzigen Grund: reiner Rückfall auf die erste
+    /// Kategorie. Die Oberfläche zeigt dann „Wofür?" statt einer Kategorie.
+    var isGuess: Bool { evidence.isEmpty }
+
     /// Die Begründung in einer Zeile.
     var reason: String {
         let parts = evidence.sorted { $0.strength > $1.strength }.prefix(2).map(\.text)

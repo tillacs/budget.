@@ -204,8 +204,12 @@ nonisolated enum SuggestionEngine {
             }
         }
 
-        // 9. Zuletzt benutzt
-        if let lastUsed, allowed.contains(lastUsed), scores.isEmpty {
+        // 9. Zuletzt benutzt — nicht bei Überweisungen und Geld an Personen: Eine
+        // Zahlung der Eltern hat mit der letzten Dividende nichts zu tun. Dort steht
+        // lieber „Wofür?" als ein falscher Name.
+        let isPersonal = (draft.importType?.hasPrefix("TRANSFER") ?? false)
+            || draft.mcc == "4829" || draft.mcc == "6012"
+        if let lastUsed, allowed.contains(lastUsed), scores.isEmpty, !isPersonal {
             add(lastUsed, 0.25, .lastUsed, "zuletzt \(name(lastUsed))")
         }
 

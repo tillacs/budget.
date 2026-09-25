@@ -1,13 +1,13 @@
 // HomeScreen.swift
 // budget. — die Seite, auf der alles steht
 //
-// Zwei Seiten, nicht mehr: die Übersicht und, einen Wisch nach links, die Kategorien.
-// Die Übersicht hat drei Ebenen:
-//   1. der Monat und das, was übrig bleibt
-//   2. die Verteilung — als Blasen (grob) oder als Ringe (genau), antippbar
-//   3. die Herkunft — die Liste, aufklappbar
-// Dazu, wenn etwas wartet: der Posteingang. Erfasst wird über das Blatt, das der
-// Kurzbefehl öffnet — oder über das Plus.
+// Drei Seiten, seitlich blätterbar, Start in der Mitte:
+//   links  — die Ringe (genau)
+//   Mitte  — die Blasen (grob)
+//   rechts — Kategorien, Konten & Import
+// Beide Übersichten zeigen oben den Monat, das Saldo und die drei Summen, darunter
+// die Grafik und die Liste. Der Posteingang sitzt oben links im Kopf, mit Zähler.
+// Erfasst wird über das Blatt, das der Kurzbefehl öffnet — oder über das Plus.
 
 import SwiftUI
 
@@ -29,17 +29,10 @@ enum HomeSheet: Identifiable, Hashable {
     }
 }
 
-enum OverviewMode: String, CaseIterable {
-    case bubbles, rings
-
-    var symbol: String { self == .bubbles ? "circle.hexagongrid.fill" : "circle.circle" }
-    var label: String { self == .bubbles ? "Blasen" : "Ringe" }
-}
-
 struct HomeScreen: View {
     let store: AppStore
 
-    @State private var page = 0
+    @State private var page = 1
     @State private var month: YearMonth = .current()
     @State private var selection: RingSelection?
     @State private var listDirection: Direction = .expense
@@ -47,9 +40,7 @@ struct HomeScreen: View {
     @State private var sheet: HomeSheet?
     @State private var flight: Flight?
     @Namespace private var totalsSlide
-    @Namespace private var modeSlide
     @State private var pendingFlight: Flight?
-    @AppStorage("overviewMode") private var modeRaw = OverviewMode.bubbles.rawValue
     @State private var report: ImportReport?
     @State private var pickerFor: Entry?
 
@@ -57,7 +48,6 @@ struct HomeScreen: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var mode: OverviewMode { OverviewMode(rawValue: modeRaw) ?? .bubbles }
     private var summary: MonthSummary { store.summary(for: month) }
 
     private var selectedSlice: Slice? {
@@ -71,8 +61,9 @@ struct HomeScreen: View {
             Palette.canvas.ignoresSafeArea()
 
             TabView(selection: $page) {
-                overview.tag(0)
-                CategoriesPage(store: store).tag(1)
+                overview(rings).tag(0)
+                overview(bubbles).tag(1)
+                CategoriesPage(store: store) { withAnimation(motion) { page = 1 } }.tag(2)
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
 
@@ -95,7 +86,7 @@ struct HomeScreen: View {
             guard let latest = store.lastReport else { return }
             report = latest
             if let newest = latest.newestDate { month = newest.yearMonth }
-            page = 0
+            page = 1
             sheet = .report
         }
         .onChange(of: sheet) { _, new in
@@ -119,25 +110,24 @@ struct HomeScreen: View {
         }
         .sensoryFeedback(.selection, trigger: selection) { _, new in new != nil }
         .sensoryFeedback(.success, trigger: store.saveTick)
-        .sensoryFeedback(.selection, trigger: modeRaw)
+        .sensoryFeedback(.selection, trigger: page)
     }
 
     // MARK: - Übersicht
 
-    private var overview: some View {
+    /// Eine Übersichtsseite: Kopf, Monat und Summen, die Grafik, die Liste.
+    private func overview<Visual: View>(_ visual: Visual) -> some View {
         ZStack(alignment: .bottomTrailing) {
             ScrollView {
                 VStack(spacing: 0) {
                     header
-                        .padding(.bottom, 6)
-                    if store.hasProposals {
-                        inboxPill
-                            .padding(.bottom, 10)
-                    }
-                    visual
-                        .padding(.bottom, 16)
+                        .padding(.bottom, 14)
+                    figureBlock
+                        .padding(.bottom, 12)
                     totals
-                        .padding(.bottom, 22)
+                        .padding(.bottom, 14)
+                    visual
+                        .padding(.bottom, 18)
                     LedgerSection(
                         store: store,
                         ring: summary.ring(listDirection),
@@ -155,9 +145,6 @@ struct HomeScreen: View {
                 .padding(.bottom, 108)
             }
             .scrollIndicators(.hidden)
-            // Der erste und letzte Monat stauchen sich beim Weiterwischen — die Geste
-            // sitzt auf der ganzen Seite, nicht nur auf der Grafik.
-            .gesture(monthSwipe)
 
             LinearGradient(
                 colors: [Palette.canvas.opacity(0), Palette.canvas],
@@ -171,20 +158,6 @@ struct HomeScreen: View {
         }
     }
 
-    /// Ein Wisch über die Seite blättert den Monat — die Seitenwischgeste des
-    /// Pagers bleibt davon unberührt, weil sie deutlich weiter greift.
-    private var monthSwipe: some Gesture {
-        DragGesture(minimumDistance: 40)
-            .onEnded { value in
-                guard abs(value.translation.width) > abs(value.translation.height) * 1.5,
-                      abs(value.translation.width) > 90 else { return }
-                let step = value.translation.width < 0 ? 1 : -1
-                let next = month.advanced(by: step)
-                guard next <= YearMonth.current() else { return }
-                withAnimation(motion) { month = next }
-            }
-    }
-
     // MARK: - Kopf
 
     private var header: some View {
@@ -192,10 +165,10 @@ struct HomeScreen: View {
             WordmarkLabel()
 
             HStack {
-                modeToggle
+                inboxButton
                 Spacer()
                 Button {
-                    withAnimation(motion) { page = 1 }
+                    withAnimation(motion) { page = 2 }
                 } label: {
                     CategoriesGlyph(categories: store.data.categories(for: .expense))
                 }
@@ -205,114 +178,91 @@ struct HomeScreen: View {
         }
     }
 
-    /// Grob oder genau: Blasen oder Ringe. Ein Glas-Schalter, die aktive Seite
-    /// wandert als Fläche.
-    private var modeToggle: some View {
-        HStack(spacing: 2) {
-            ForEach(OverviewMode.allCases, id: \.self) { candidate in
-                let isOn = mode == candidate
-                Button {
-                    withAnimation(motion) { modeRaw = candidate.rawValue }
-                } label: {
-                    Image(systemName: candidate.symbol)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(isOn ? Palette.ink : Palette.faint)
-                        .frame(width: 32, height: 30)
-                        .background {
-                            if isOn {
-                                Capsule().fill(Palette.raised)
-                                    .matchedGeometryEffect(id: "modus", in: modeSlide)
-                            }
-                        }
+    /// Der Posteingang, mit Zähler. Ohne Vorschläge bleibt er still und grau.
+    private var inboxButton: some View {
+        let count = store.proposals.count
+        return Button { sheet = .inbox } label: {
+            ZStack(alignment: .topTrailing) {
+                Image(systemName: count > 0 ? "tray.full" : "tray")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(count > 0 ? Palette.ink : Palette.faint)
+                    .frame(width: 34, height: 34)
+                    .glassCapsule(interactive: true)
+                if count > 0 {
+                    Text(count > 99 ? "99+" : "\(count)")
+                        .font(.system(size: 10, weight: .bold))
+                        .monospacedDigit()
+                        .foregroundStyle(Palette.canvas)
+                        .padding(.horizontal, 5)
+                        .frame(minWidth: 17, minHeight: 17)
+                        .background(Capsule().fill(Palette.ink))
+                        .offset(x: 7, y: -6)
+                        .transition(.scale.combined(with: .opacity))
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(candidate.label)
-                .accessibilityAddTraits(isOn ? [.isSelected] : [])
             }
         }
-        .padding(2)
-        .glassCapsule()
-    }
-
-    private var inboxPill: some View {
-        Button { sheet = .inbox } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "tray.full")
-                    .font(.footnote.weight(.semibold))
-                Text("\(store.proposals.count) Vorschläge warten")
-                    .font(.subheadline.weight(.medium))
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(Palette.faint)
-            }
-            .foregroundStyle(Palette.ink)
-            .padding(.vertical, 11)
-            .padding(.horizontal, 16)
-            .glassCapsule(interactive: true)
-        }
-        .buttonStyle(.plain)
-        .transition(.opacity.combined(with: .move(edge: .top)))
+        .buttonStyle(PressableRowStyle())
+        .animation(motion, value: count)
+        .accessibilityLabel(count > 0 ? "\(count) Vorschläge im Posteingang" : "Posteingang leer")
     }
 
     // MARK: - Grafik
 
-    @ViewBuilder
-    private var visual: some View {
-        switch mode {
-        case .bubbles:
-            VStack(spacing: 6) {
-                figureBlock
-                    .padding(.top, 6)
-                BubbleField(
-                    summary: summary,
-                    onTap: { sheet = .detail($0.category.id) },
-                    onPendingTap: { sheet = .inbox })
-                    .frame(height: 340)
+    private var bubbles: some View {
+        BubbleField(
+            summary: summary,
+            onTap: { sheet = .detail($0.category.id) },
+            onPendingTap: { sheet = .inbox })
+            .frame(height: 340)
+            .overlay(alignment: .bottom) {
                 if summary.isEmpty && !summary.hasPending {
                     Text("Doppeltipp auf die Rückseite, das Plus —\noder einen Export von Trade Republic teilen.")
                         .font(.caption)
                         .multilineTextAlignment(.center)
                         .foregroundStyle(Palette.faint)
-                        .padding(.top, -120)
+                        .padding(.bottom, 120)
                 }
             }
-            .transition(.opacity)
-        case .rings:
-            FlowRings(summary: summary, selection: $selection) { ringCenter }
-                .frame(maxWidth: 310)
-                .frame(maxWidth: .infinity)
-                .padding(.top, 6)
-                .transition(.opacity)
-        }
     }
 
-    /// Monat und Ergebnis über den Blasen — in den Ringen sitzt dasselbe in der Mitte.
+    private var rings: some View {
+        FlowRings(summary: summary, selection: $selection) { ringCenter }
+            .frame(maxWidth: 300)
+            .frame(maxWidth: .infinity)
+            .padding(.top, 4)
+    }
+
+    /// Monat und Ergebnis über der Grafik: Der Monat ist die Überschrift der
+    /// Seite, das Saldo die Zahl darunter.
     private var figureBlock: some View {
-        VStack(spacing: 0) {
-            monthMenu
+        VStack(spacing: 2) {
+            HStack(spacing: 6) {
+                monthStep(-1, "chevron.left")
+                monthMenu
+                monthStep(1, "chevron.right")
+            }
             let figure = centerFigure
             Text(figure.text)
-                .font(.system(size: 40, weight: .semibold))
+                .font(.system(size: 44, weight: .bold))
                 .monospacedDigit()
-                .tracking(-1.4)
+                .tracking(-1.6)
                 .contentTransition(.numericText())
                 .foregroundStyle(figure.tone)
                 .lineLimit(1)
+                .minimumScaleFactor(0.6)
             Text(figure.caption)
-                .font(.system(size: 10, weight: .semibold))
+                .font(.system(size: 11, weight: .semibold))
                 .textCase(.uppercase)
                 .kerning(1.4)
-                .foregroundStyle(Palette.faint)
+                .foregroundStyle(Palette.muted)
         }
+        .frame(maxWidth: .infinity)
         .animation(motion, value: month)
     }
 
     @ViewBuilder
     private var ringCenter: some View {
         VStack(spacing: 2) {
-            monthMenu
-
             if let slice = selectedSlice {
                 Text(slice.category.symbol)
                     .font(.system(size: 20))
@@ -357,6 +307,25 @@ struct HomeScreen: View {
         .accessibilityElement(children: .contain)
     }
 
+    /// Einen Monat vor oder zurück. Der Pager nimmt sich die Wischgeste, also
+    /// gibt es Pfeile — und keine Zukunft.
+    private func monthStep(_ step: Int, _ symbol: String) -> some View {
+        let next = month.advanced(by: step)
+        let allowed = next <= YearMonth.current()
+        return Button {
+            withAnimation(motion) { month = next }
+        } label: {
+            Image(systemName: symbol)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(allowed ? Palette.muted : Palette.faint.opacity(0.4))
+                .frame(width: 34, height: 34)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!allowed)
+        .accessibilityLabel(step < 0 ? "Vormonat" : "Folgemonat")
+    }
+
     private var monthMenu: some View {
         Menu {
             ForEach(selectableMonths, id: \.self) { candidate in
@@ -375,14 +344,15 @@ struct HomeScreen: View {
                 Text(MoneyFormat.month(month))
                     .contentTransition(.numericText())
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 8, weight: .bold))
-                    .padding(.top, 1)
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(Palette.muted)
+                    .padding(.top, 2)
             }
-            .font(.footnote.weight(.medium))
-            .foregroundStyle(Palette.muted)
+            .font(.title3.weight(.semibold))
+            .foregroundStyle(Palette.ink)
             .lineLimit(1)
             .padding(.vertical, 6)
-            .padding(.horizontal, 8)
+            .padding(.horizontal, 6)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -463,9 +433,9 @@ struct HomeScreen: View {
             sheet = .quickEntry(.expense)
         } label: {
             Image(systemName: "plus")
-                .font(.system(size: 24, weight: .medium))
+                .font(.system(size: 22, weight: .medium))
                 .foregroundStyle(Palette.canvas)
-                .frame(width: 58, height: 58)
+                .frame(width: 52, height: 52)
         }
         .buttonStyle(.glassProminent)
         .buttonBorderShape(.circle)
@@ -580,7 +550,7 @@ private struct TotalSegment: View {
 
                 VStack(alignment: .leading, spacing: 0) {
                     Text(direction.plural)
-                        .font(.system(size: 10))
+                        .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(isActive ? Palette.muted : Palette.faint)
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)

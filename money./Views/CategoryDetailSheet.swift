@@ -62,8 +62,9 @@ struct CategoryDetailSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Fertig") { dismiss() }.fontWeight(.semibold)
+                    Button("Fertig") { dismiss() }.fontWeight(.semibold).foregroundStyle(Palette.ink)
                 }
+                .sharedBackgroundVisibility(.hidden)
             }
         }
         .tint(Palette.accent)

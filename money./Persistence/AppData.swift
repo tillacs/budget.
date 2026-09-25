@@ -108,6 +108,22 @@ nonisolated struct AppData: Codable, Sendable {
             }
         }
         self.memory = memory
+
+        // Eine Datei aus Schema 2 kennt weder Investiert noch die neuen Bereiche.
+        // Was der Seed inzwischen mitbringt und dem Namen nach fehlt, wird ergänzt —
+        // einmal, beim Umstieg.
+        if version < 3 {
+            var next = (categories.map(\.sortIndex).max() ?? -1) + 1
+            for seed in Seed.categories() where !categories.contains(where: {
+                $0.direction == seed.direction
+                    && $0.name.compare(seed.name, options: .caseInsensitive) == .orderedSame
+            }) {
+                var added = seed
+                added.sortIndex = next
+                next += 1
+                categories.append(added)
+            }
+        }
     }
 
     func encode(to encoder: any Encoder) throws {

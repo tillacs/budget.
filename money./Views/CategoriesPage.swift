@@ -11,10 +11,14 @@ import UniformTypeIdentifiers
 
 struct CategoriesPage: View {
     let store: AppStore
+    /// Zurück zur Mitte — für das X oben rechts, wenn man nicht wischen will.
+    var onClose: () -> Void = {}
 
     @State private var editingCategory: BudgetCategory?
     @State private var newCategoryDirection: Direction?
     @State private var showsResetConfirmation = false
+    @State private var showsImportResetConfirmation = false
+    @State private var showsForgetConfirmation = false
     @State private var showsImporter = false
     @State private var importError: String?
     @State private var ownerName = ""
@@ -42,7 +46,21 @@ struct CategoriesPage: View {
                     Button(isSorting ? "Fertig" : "Sortieren") {
                         withAnimation { isSorting.toggle() }
                     }
+                    .foregroundStyle(Palette.muted)
                 }
+                .sharedBackgroundVisibility(.hidden)
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(action: onClose) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Palette.ink)
+                            .frame(width: 34, height: 34)
+                            .glassCapsule(interactive: true)
+                    }
+                    .buttonStyle(PressableRowStyle())
+                    .accessibilityLabel("Zurück zur Übersicht")
+                }
+                .sharedBackgroundVisibility(.hidden)
             }
         }
         .tint(Palette.accent)
@@ -74,6 +92,22 @@ struct CategoriesPage: View {
             Button("OK") { importError = nil }
         } message: {
             Text(importError ?? "")
+        }
+        .confirmationDialog(
+            "Eingelesene Buchungen entfernen?", isPresented: $showsImportResetConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Entfernen", role: .destructive) { store.resetImport() }
+        } message: {
+            Text("Alle Buchungen aus Trade Republic verschwinden, auch die bestätigten. Kategorien und Gelerntes bleiben. Der nächste Export bringt alles wieder.")
+        }
+        .confirmationDialog(
+            "Gelerntes vergessen?", isPresented: $showsForgetConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Vergessen", role: .destructive) { store.forgetLearning() }
+        } message: {
+            Text("budget. weiß danach nichts mehr über Händler und Kategorien. Buchungen bleiben.")
         }
         .confirmationDialog(
             "Wirklich alles löschen?", isPresented: $showsResetConfirmation,
@@ -318,17 +352,30 @@ struct CategoriesPage: View {
 
     private var dataSection: some View {
         Section {
+            Button { showsImportResetConfirmation = true } label: {
+                Label("Eingelesene Buchungen entfernen", systemImage: "arrow.uturn.backward")
+                    .foregroundStyle(Palette.ink)
+            }
+            .listRowBackground(Palette.card)
+            Button { showsForgetConfirmation = true } label: {
+                Label("Gelerntes vergessen", systemImage: "brain")
+                    .foregroundStyle(Palette.ink)
+            }
+            .listRowBackground(Palette.card)
             Button(role: .destructive) { showsResetConfirmation = true } label: {
                 Text("Alles löschen")
             }
             .listRowBackground(Palette.card)
+        } header: {
+            Text("Verlauf")
         } footer: {
             Text("budget. speichert ausschließlich auf diesem Gerät — kein Konto, keine Übertragung. "
-                + "Der Export wird gelesen und nicht behalten.")
+                + "Der Export wird gelesen und nicht behalten. Eingelesenes lässt sich entfernen "
+                + "und mit dem nächsten Export neu aufbauen; Gelerntes bleibt dabei erhalten.")
         }
     }
 }
 
 #Preview("Kategorien") {
-    CategoriesPage(store: .preview)
+    CategoriesPage(store: .preview) {}
 }

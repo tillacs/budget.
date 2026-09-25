@@ -340,6 +340,28 @@ struct SuggestionEngineTests {
         #expect(ranking.suggestion.alternatives.contains(essen.id))
     }
 
+    /// Eine Überweisung der Eltern hat mit der letzten Dividende nichts zu tun:
+    /// ohne Gelerntes gibt es keinen Vorschlag, nur die offene Frage.
+    @Test func überweisungenFallenNichtAufZuletztBenutztZurück() throws {
+        let data = AppData.seeded()
+        let kapital = try #require(data.categories.first { $0.name == "Kapitalerträge" })
+        var transfer = Entry(date: CalendarDate(year: 2026, month: 9, day: 3), amount: 500,
+                             direction: .income, categoryID: BudgetCategory.noneID, source: .tradeRepublic,
+                             merchant: "Mutter Muster", importType: "TRANSFER_INBOUND")
+        let ranking = try #require(SuggestionEngine.rank(
+            transfer, categories: data.categories, memory: data.memory, lastUsed: kapital.id, history: HistoryIndex()))
+        #expect(ranking.suggestion.isGuess)
+        #expect(ranking.suggestion.confidence == 0)
+
+        // Eine Kartenzahlung darf dagegen auf zuletzt benutzt zurückfallen.
+        transfer.importType = "CARD_TRANSACTION"
+        transfer.direction = .expense
+        let essen = try #require(data.categories.first { $0.name == "Essen" })
+        let card = try #require(SuggestionEngine.rank(
+            transfer, categories: data.categories, memory: data.memory, lastUsed: essen.id, history: HistoryIndex()))
+        #expect(card.suggestion.isGuess == false)
+    }
+
     @Test func wiederkehrendesGibtEinenSchub() throws {
         var data = AppData.seeded()
         let abos = try #require(data.categories.first { $0.name == "Abos" })
@@ -447,5 +469,10 @@ struct InboxStoreTests {
         let loaded = try #require(try file.load())
         #expect(loaded.schemaVersion == 3)
         #expect(loaded.rememberedCategory(forMerchant: "rewe")?.id == id)
+        // Der Umstieg bringt die neuen Bereiche mit, ohne die eigene Kategorie anzufassen.
+        #expect(loaded.categories.first { $0.name == "Essen" }?.id == id)
+        #expect(loaded.categories.contains { $0.name == "Sparplan" && $0.direction == .invest })
+        #expect(loaded.categories.contains { $0.name == "Kleidung" && $0.direction == .expense })
+        #expect(loaded.categories.filter { $0.name == "Essen" }.count == 1)
     }
 }

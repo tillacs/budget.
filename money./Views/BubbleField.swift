@@ -131,7 +131,8 @@ struct BubbleField: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var placements: [String: BubbleLayout.Placement] = [:]
     @State private var size: CGSize = .zero
-    @GestureState private var holding = false
+    @State private var holding = false
+    @State private var pressing = false
     @State private var appeared = false
 
     private var bubbles: [Bubble] { Bubble.from(summary) }
@@ -154,12 +155,20 @@ struct BubbleField: View {
             .onChange(of: proxy.size) { _, new in relayout(new) }
             .onChange(of: summary) { relayout(proxy.size) }
         }
-        .simultaneousGesture(
-            LongPressGesture(minimumDuration: 0.28)
-                .sequenced(before: DragGesture(minimumDistance: 0))
-                .updating($holding) { value, state, _ in
-                    if case .second = value { state = true }
-                })
+        // Kein DragGesture: Das würde der Seite darunter das Scrollen wegnehmen.
+        // Gedrückt halten schaltet die Zahlen nach kurzer Zeit ein, loslassen aus.
+        .onLongPressGesture(minimumDuration: 0.28, maximumDistance: 12) {
+        } onPressingChanged: { down in
+            pressing = down
+            if down {
+                Task {
+                    try? await Task.sleep(for: .seconds(0.28))
+                    if pressing { holding = true }
+                }
+            } else {
+                holding = false
+            }
+        }
         .sensoryFeedback(.impact(flexibility: .soft), trigger: holding) { _, new in new }
         .animation(motion, value: placements)
         .animation(.easeOut(duration: 0.18), value: holding)

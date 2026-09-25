@@ -390,6 +390,21 @@ final class AppStore {
         persist()
     }
 
+    /// Alle eingelesenen Buchungen entfernen, Kategorien und Gelerntes behalten.
+    /// Der nächste Export bringt sie wieder — dann mit dem, was die App weiß.
+    func resetImport() {
+        data.entries.removeAll { $0.source == .tradeRepublic }
+        data.ignoredExternalIDs = []
+        data.lastImport = nil
+        persist()
+    }
+
+    /// Das Gedächtnis leeren. Buchungen und Kategorien bleiben.
+    func forgetLearning() {
+        data.memory = MerchantMemory()
+        persist()
+    }
+
     func resetAllData() {
         try? file.delete()
         data = .seeded()

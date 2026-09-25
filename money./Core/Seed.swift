@@ -26,6 +26,8 @@ nonisolated enum Seed {
             make("Shopping", "🛍️", .rose, .expense),
             make("Drogerie", "🧴", .lime, .expense),
             make("Gesundheit", "💊", .sky, .expense),
+            make("Kleidung", "👕", .violet, .expense),
+            make("Sport", "🏋️", .lime, .expense),
             make("Bargeld", "💶", .sand, .expense),
             make("Gehalt", "💼", .mint, .income),
             make("Kapitalerträge", "💹", .teal, .income),

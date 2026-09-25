@@ -3,15 +3,16 @@
 //
 // Was die Maschine nicht sicher wusste, wartet hier: je Zeile Betrag, Händler,
 // Tag, die vorgeschlagene Kategorie als Chip und die Begründung in einem Satz.
-// Wischen nach rechts nimmt an — der Chip rastet bei 40 % spürbar ein, davor
-// federt er zurück. Wischen nach links lehnt ab. Tipp auf den Chip zeigt die
-// drei besten Kategorien; antippen bestätigt sofort.
+// Wischen nach rechts nimmt an, Wischen nach links lehnt ab. Tipp auf den Chip
+// zeigt die drei besten Kategorien; antippen bestätigt sofort.
+//
+// Kartenzahlungen desselben Händlers stehen als Gruppe — eine Entscheidung für
+// „EDEKA, 19 Buchungen" ist eine Entscheidung. Überweisungen und Geld an Personen
+// stehen immer einzeln: Wer sich dreimal Geld schickt, meint dreimal etwas anderes.
+// Jede Gruppe lässt sich mit einem Tipp auf die Zahl in Einzelne auflösen.
 
 import SwiftUI
 
-/// Vorschläge desselben Händlers in derselben Richtung stehen zusammen: Eine
-/// Entscheidung für „EDEKA, 19 Buchungen" ist eine Entscheidung — und die Maschine
-/// lernt sie neunzehnfach.
 struct InboxGroup: Identifiable, Hashable {
     let id: String
     let entries: [Entry]
@@ -21,19 +22,40 @@ struct InboxGroup: Identifiable, Hashable {
     var total: Decimal { entries.reduce(0) { $0 + $1.signedAmount } }
     var ids: [UUID] { entries.map(\.id) }
 
-    static func make(_ proposals: [Entry]) -> [InboxGroup] {
+    /// Nur Kartenzahlungen bei Händlern und Depot-Buchungen werden gebündelt.
+    static func isGroupable(_ entry: Entry) -> Bool {
+        guard let type = entry.importType else { return false }
+        if type.hasPrefix("TRANSFER") { return false }
+        if entry.mcc == "4829" || entry.mcc == "6012" { return false }   // Geld an Personen
+        if entry.kind == .refund { return false }
+        return entry.signals.merchantKey != nil
+    }
+
+    static func make(_ proposals: [Entry], split: Set<String>) -> [InboxGroup] {
         var order: [String] = []
         var buckets: [String: [Entry]] = [:]
         for entry in proposals {
-            let key = (entry.signals.merchantKey ?? entry.externalID ?? entry.id.uuidString)
-                + "|" + entry.direction.rawValue + "|" + entry.kind.rawValue
+            let key: String
+            if isGroupable(entry), let merchant = entry.signals.merchantKey {
+                key = merchant + "|" + entry.direction.rawValue + "|" + entry.kind.rawValue
+            } else {
+                key = entry.id.uuidString
+            }
             if buckets[key] == nil { order.append(key) }
             buckets[key, default: []].append(entry)
         }
-        return order.map { InboxGroup(id: $0, entries: buckets[$0] ?? []) }
-            .sorted { a, b in
-                a.count == b.count ? a.lead.date > b.lead.date : a.count > b.count
-            }
+        var groups: [InboxGroup] = order.map { key in
+            InboxGroup(id: key, entries: buckets[key] ?? [])
+        }
+        groups.sort { (a: InboxGroup, b: InboxGroup) -> Bool in
+            if a.count != b.count { return a.count > b.count }
+            return a.lead.date > b.lead.date
+        }
+        // Aufgelöste Gruppen stehen als Einzelne an derselben Stelle.
+        return groups.flatMap { group -> [InboxGroup] in
+            guard group.count > 1, split.contains(group.id) else { return [group] }
+            return group.entries.map { InboxGroup(id: $0.id.uuidString, entries: [$0]) }
+        }
     }
 }
 
@@ -42,56 +64,120 @@ struct InboxSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var acceptedAll = 0
+    @State private var accepted = 0
+    @State private var rejected = 0
     @State private var pickerFor: InboxGroup?
+    @State private var rejecting: InboxGroup?
+    @State private var expanded: Set<String> = []
+    @State private var split: Set<String> = []
 
     private var proposals: [Entry] { store.proposals }
-    private var groups: [InboxGroup] { InboxGroup.make(proposals) }
+    private var groups: [InboxGroup] { InboxGroup.make(proposals, split: split) }
     private var confidentCount: Int {
         proposals.filter { ($0.suggestion?.band ?? .unsure) != .unsure }.count
     }
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                LazyVStack(spacing: 10) {
-                    if confidentCount > 0 { acceptAllButton }
-                    if proposals.isEmpty {
-                        emptyState
-                    }
-                    ForEach(groups) { group in
-                        InboxRow(store: store, group: group) { pickerFor = group }
-                            .transition(.asymmetric(
-                                insertion: .opacity,
-                                removal: .move(edge: .trailing).combined(with: .opacity)))
-                    }
-                }
-                .padding(.horizontal, Metrics.screenInset)
-                .padding(.vertical, 12)
+            list
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .background(Palette.canvas)
                 .animation(motion, value: groups.map(\.id))
-            }
-            .background(Palette.canvas)
-            .navigationTitle(proposals.isEmpty ? "Posteingang"
-                             : "\(proposals.count) Vorschläge · \(groups.count) Händler")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Fertig") { dismiss() }.fontWeight(.semibold)
+                .navigationTitle(proposals.isEmpty ? "Posteingang" : "\(proposals.count) offen")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Fertig") { dismiss() }.fontWeight(.semibold).foregroundStyle(Palette.ink)
+                    }
+                    .sharedBackgroundVisibility(.hidden)
                 }
-            }
         }
         .tint(Palette.accent)
         .sheet(item: $pickerFor) { group in
             CategoryPickerSheet(store: store, direction: group.lead.direction, current: group.lead.categoryID) {
+                accepted += 1
                 store.correct(group.ids, to: $0)
             }
         }
-        .sensoryFeedback(.impact(weight: .medium), trigger: acceptedAll)
+        .sensoryFeedback(.success, trigger: accepted)
+        .sensoryFeedback(.warning, trigger: rejected)
+    }
+
+    private var list: some View {
+        List {
+            if confidentCount > 0 {
+                acceptAllButton
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets(top: 4, leading: Metrics.screenInset, bottom: 8, trailing: Metrics.screenInset))
+            }
+            if proposals.isEmpty {
+                emptyState
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            }
+            ForEach(groups) { group in
+                row(group)
+            }
+        }
+    }
+
+    private func row(_ group: InboxGroup) -> some View {
+        InboxRow(
+            store: store, group: group,
+            isExpanded: expanded.contains(group.id),
+            onToggle: { withAnimation(motion) { toggle(group.id) } },
+            onSplit: { withAnimation(motion) { _ = split.insert(group.id) } },
+            onMore: { pickerFor = group },
+            onPick: { category in
+                accepted += 1
+                store.correct(group.ids, to: category)
+            })
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+        .listRowInsets(EdgeInsets(top: 5, leading: Metrics.screenInset, bottom: 5, trailing: Metrics.screenInset))
+        .swipeActions(edge: .leading, allowsFullSwipe: true) { leadingActions(group) }
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) { trailingActions(group) }
+    }
+
+    @ViewBuilder
+    private func leadingActions(_ group: InboxGroup) -> some View {
+        if !(group.lead.suggestion?.isGuess ?? true) {
+            Button {
+                accepted += 1
+                store.accept(group.ids)
+            } label: {
+                Label("Annehmen", systemImage: "checkmark")
+            }
+            .tint(Palette.positive)
+        }
+    }
+
+    @ViewBuilder
+    private func trailingActions(_ group: InboxGroup) -> some View {
+        Button(role: .destructive) {
+            rejected += 1
+            store.reject(group.ids, as: .delete)
+        } label: {
+            Label("Verwerfen", systemImage: "trash")
+        }
+        Button {
+            rejected += 1
+            store.reject(group.ids, as: .transfer)
+        } label: {
+            Label("Umbuchung", systemImage: "arrow.left.arrow.right")
+        }
+        .tint(Palette.muted)
+    }
+
+    private func toggle(_ id: String) {
+        if expanded.contains(id) { expanded.remove(id) } else { expanded.insert(id) }
     }
 
     private var acceptAllButton: some View {
         Button {
-            acceptedAll += store.acceptAllConfident()
+            accepted += store.acceptAllConfident()
         } label: {
             Label("\(confidentCount) sichere annehmen", systemImage: "checkmark.circle.fill")
                 .font(.subheadline.weight(.semibold))
@@ -100,7 +186,6 @@ struct InboxSheet: View {
         }
         .buttonStyle(.glassProminent)
         .tint(Palette.ink)
-        .padding(.bottom, 6)
     }
 
     private var emptyState: some View {
@@ -124,88 +209,49 @@ struct InboxSheet: View {
     }
 }
 
-/// Eine Zeile im Posteingang, mit der Wischgeste.
+/// Eine Zeile im Posteingang.
 private struct InboxRow: View {
     let store: AppStore
     let group: InboxGroup
+    let isExpanded: Bool
+    let onToggle: () -> Void
+    let onSplit: () -> Void
     let onMore: () -> Void
+    let onPick: (UUID) -> Void
 
     private var entry: Entry { group.lead }
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var offset: CGFloat = 0
-    @State private var crossed = false
-    @State private var expanded = false
-    @State private var showsReject = false
-    @State private var leaving = false
-    @State private var accepted = 0
-
     private var category: BudgetCategory? { store.data.category(entry.categoryID) }
     private var tint: Color { category.map { Palette.tint($0.tint) } ?? Palette.faint }
+    /// Ein Vorschlag ohne Grund ist keiner — dann steht „Wofür?" statt einer Kategorie.
+    private var isGuess: Bool { entry.suggestion?.isGuess ?? true }
 
     var body: some View {
-        GeometryReader { proxy in
-            let threshold = proxy.size.width * 0.4
-            ZStack {
-                backdrop
-                card
-                    .offset(x: offset)
-                    .gesture(drag(threshold: threshold, width: proxy.size.width))
-            }
-            .onChange(of: offset) { _, new in
-                let now = abs(new) >= threshold
-                if now != crossed { crossed = now }
-            }
-        }
-        .frame(height: expanded ? 158 : 104)
-        .animation(motion, value: expanded)
-        .sensoryFeedback(.selection, trigger: crossed) { _, new in new }
-        .sensoryFeedback(.success, trigger: accepted)
-        .confirmationDialog("Gehört nicht hierher?", isPresented: $showsReject, titleVisibility: .visible) {
-            Button("Als Umbuchung behalten") { store.reject(group.ids, as: .transfer) }
-            Button("Verwerfen", role: .destructive) { store.reject(group.ids, as: .delete) }
-            Button("Abbrechen", role: .cancel) { withAnimation(motion) { offset = 0 } }
-        } message: {
-            Text("Eine Umbuchung zählt nirgends mit. Verworfen kommt die Zeile beim nächsten Import nicht wieder.")
-        }
-    }
-
-    private var backdrop: some View {
-        HStack {
-            Image(systemName: "checkmark")
-                .font(.title3.weight(.bold))
-                .foregroundStyle(.white)
-                .opacity(offset > 12 ? 1 : 0)
-                .scaleEffect(crossed && offset > 0 ? 1.15 : 1)
-                .padding(.leading, 24)
-            Spacer()
-            Image(systemName: "xmark")
-                .font(.title3.weight(.bold))
-                .foregroundStyle(.white)
-                .opacity(offset < -12 ? 1 : 0)
-                .scaleEffect(crossed && offset < 0 ? 1.15 : 1)
-                .padding(.trailing, 24)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(
-            RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous)
-                .fill(offset > 0 ? Palette.positive : (offset < 0 ? Palette.negative : Palette.raised))
-                .opacity(min(1, abs(offset) / 60)))
-        .animation(.spring(duration: 0.25, bounce: 0), value: crossed)
-    }
-
-    private var card: some View {
         VStack(alignment: .leading, spacing: 7) {
-            // Erste Zeile: wer und wie viel. Der Name gibt zuletzt nach.
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(entry.title.isEmpty ? "Ohne Namen" : entry.title)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Palette.ink)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                if group.count > 1 { CountChip(count: group.count) }
+                if group.count > 1 {
+                    Button(action: onSplit) {
+                        HStack(spacing: 3) {
+                            Text("\(group.count)")
+                            Image(systemName: "rectangle.split.3x1")
+                                .font(.system(size: 8, weight: .semibold))
+                        }
+                        .font(.caption2.weight(.medium))
+                        .monospacedDigit()
+                        .foregroundStyle(Palette.muted)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(Palette.raised))
+                        .fixedSize()
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(group.count) Buchungen, einzeln anzeigen")
+                }
                 Spacer(minLength: 8)
-                // Der Betrag gibt nie nach — ein abgeschnittener Betrag ist keiner.
                 Text(MoneyFormat.signed(group.total))
                     .font(.system(size: 17, weight: .semibold))
                     .monospacedDigit()
@@ -214,7 +260,6 @@ private struct InboxRow: View {
                     .fixedSize()
                     .layoutPriority(2)
             }
-            // Zweite Zeile: die Kategorie zum Antippen, rechts der Tag.
             HStack(spacing: 8) {
                 chipButton
                 Spacer(minLength: 4)
@@ -231,12 +276,16 @@ private struct InboxRow: View {
                 Text("Erstattung — wofür war das?")
                     .font(.caption)
                     .foregroundStyle(Palette.muted)
+            } else if isGuess {
+                Text("Noch nichts gelernt — bitte einmal zuordnen.")
+                    .font(.caption)
+                    .foregroundStyle(Palette.muted)
             }
-            if expanded { alternatives }
+            if isExpanded { alternatives }
         }
         .padding(.horizontal, Metrics.cardPadding)
         .padding(.vertical, 12)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .background(
             RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous).fill(Palette.card))
         .overlay(
@@ -246,29 +295,37 @@ private struct InboxRow: View {
     }
 
     private var chipButton: some View {
-        Button {
-            withAnimation(motion) { expanded.toggle() }
-        } label: {
+        Button(action: onToggle) {
             HStack(spacing: 6) {
-                if let category { CategoryChip(category: category, isOn: true, compact: true) }
-                ConfidenceDot(band: entry.suggestion?.band ?? .unsure, tint: tint)
+                if isGuess {
+                    HStack(spacing: 6) {
+                        Image(systemName: "questionmark")
+                            .font(.caption.weight(.bold))
+                        Text("Wofür?")
+                            .font(.caption.weight(.medium))
+                    }
+                    .foregroundStyle(Palette.ink)
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 10)
+                    .glassCapsule(interactive: true)
+                } else if let category {
+                    CategoryChip(category: category, isOn: true, compact: true)
+                    ConfidenceDot(band: entry.suggestion?.band ?? .unsure, tint: tint)
+                }
             }
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Kategorie: \(category?.name ?? "keine"), andere wählen")
+        .accessibilityLabel(isGuess ? "Kategorie wählen" : "Kategorie: \(category?.name ?? "keine"), andere wählen")
     }
 
     private var alternatives: some View {
-        let ids = [entry.categoryID] + (entry.suggestion?.alternatives ?? [])
+        let ids = (isGuess ? [] : [entry.categoryID]) + (entry.suggestion?.alternatives ?? [])
         let options = ids.compactMap { store.data.category($0) }
         return GlassEffectContainer(spacing: 8) {
             HStack(spacing: 8) {
                 ForEach(options) { option in
-                    Button {
-                        accepted += 1
-                        store.correct(group.ids, to: option.id)
-                    } label: {
-                        CategoryChip(category: option, isOn: option.id == entry.categoryID, compact: true)
+                    Button { onPick(option.id) } label: {
+                        CategoryChip(category: option, isOn: !isGuess && option.id == entry.categoryID, compact: true)
                     }
                     .buttonStyle(.plain)
                 }
@@ -284,35 +341,6 @@ private struct InboxRow: View {
             }
         }
         .transition(.opacity.combined(with: .move(edge: .top)))
-    }
-
-    private func drag(threshold: CGFloat, width: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 14, coordinateSpace: .local)
-            .onChanged { value in
-                guard abs(value.translation.width) > abs(value.translation.height) || offset != 0 else { return }
-                let raw = value.translation.width
-                // Rubber-Banding hinter der Schwelle: es geht weiter, aber zäher.
-                let limit = threshold * 1.15
-                offset = abs(raw) <= limit ? raw : (raw < 0 ? -1 : 1) * (limit + (abs(raw) - limit) * 0.25)
-            }
-            .onEnded { value in
-                if offset >= threshold {
-                    accepted += 1
-                    withAnimation(.spring(duration: 0.3, bounce: 0)) { offset = width }
-                    Task {
-                        try? await Task.sleep(for: .seconds(0.12))
-                        store.accept(group.ids)
-                    }
-                } else if offset <= -threshold {
-                    showsReject = true
-                } else {
-                    withAnimation(motion) { offset = 0 }
-                }
-            }
-    }
-
-    private var motion: Animation? {
-        reduceMotion ? nil : .spring(duration: 0.35, bounce: 0.2)
     }
 }
 
