@@ -189,7 +189,7 @@ struct HomeScreen: View {
                     .frame(width: 34, height: 34)
                     .glassCapsule(interactive: true)
                 if count > 0 {
-                    Text(count > 99 ? "99+" : "\(count)")
+                    Text(count > 999 ? "999+" : "\(count)")
                         .font(.system(size: 10, weight: .bold))
                         .monospacedDigit()
                         .foregroundStyle(Palette.canvas)

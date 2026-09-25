@@ -36,6 +36,11 @@ nonisolated enum MerchantKey {
         for suffix in ["S.a.r.l.", "S.a r.l.", "S.à r.l.", "et Cie,", "et Cie", "S.C.A.", "S.C.A"] {
             text = text.replacingOccurrences(of: suffix, with: " ", options: .caseInsensitive)
         }
+        // Bestellcodes hinter einem Stern: „DHL*BBY8CWC378Z2" ist DHL.
+        if let star = text.range(of: "*"), text[star.upperBound...].filter(\.isNumber).count >= 2,
+           !text.uppercased().hasPrefix("PAYPAL") {
+            text = String(text[..<star.lowerBound])
+        }
         text = text.trimmingCharacters(in: CharacterSet(charactersIn: " ,"))
         return text.split(separator: " ", omittingEmptySubsequences: true).joined(separator: " ")
     }
