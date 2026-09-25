@@ -342,25 +342,40 @@ private struct InboxRow: View {
         // „nein, das war wirklich Geld für mich".
         let ids = (isGuess || linkedOriginal != nil ? [] : [entry.categoryID]) + (entry.suggestion?.alternatives ?? [])
         let options = ids.compactMap { store.data.category($0) }
-        return GlassEffectContainer(spacing: 8) {
-            HStack(spacing: 8) {
-                ForEach(options) { option in
-                    Button { onPick(option.id) } label: {
-                        CategoryChip(category: option, isOn: !isGuess && option.id == entry.categoryID, compact: true)
+        // Scrollbar, damit bei langen Namen nichts über den Rand fällt — und „Andere"
+        // steht vorn, damit es immer erreichbar ist.
+        return ScrollView(.horizontal, showsIndicators: false) {
+            GlassEffectContainer(spacing: 8) {
+                HStack(spacing: 8) {
+                    Button(action: onMore) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "ellipsis")
+                                .font(.caption.weight(.bold))
+                            Text("Andere")
+                                .font(.caption.weight(.medium))
+                        }
+                        .foregroundStyle(Palette.ink)
+                        .padding(.vertical, 8)
+                        .padding(.horizontal, 12)
+                        .frame(minHeight: 34)
+                        .glassCapsule(interactive: true)
+                        .contentShape(Capsule())
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Alle Kategorien")
+                    ForEach(options) { option in
+                        Button { onPick(option.id) } label: {
+                            CategoryChip(category: option, isOn: !isGuess && option.id == entry.categoryID, compact: true)
+                                .frame(minHeight: 34)
+                                .contentShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
-                Button(action: onMore) {
-                    Image(systemName: "ellipsis")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(Palette.muted)
-                        .frame(width: 34, height: 30)
-                        .glassCapsule(interactive: true)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Alle Kategorien")
+                .padding(.vertical, 2)
             }
         }
+        .scrollClipDisabled()
         .transition(.opacity.combined(with: .move(edge: .top)))
     }
 }
