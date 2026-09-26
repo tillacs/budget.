@@ -256,6 +256,8 @@ final class AppStore {
         return pool.sorted { a, b in
             let ea = a.amount == entry.amount, eb = b.amount == entry.amount
             if ea != eb { return ea }
+            let ra = a.amount.roughlyEquals(entry.amount), rb = b.amount.roughlyEquals(entry.amount)
+            if ra != rb { return ra }
             let da = distance(a), db = distance(b)
             if da != db { return da < db }
             return (a.date, a.createdAt) > (b.date, b.createdAt)
@@ -335,7 +337,7 @@ final class AppStore {
                     alternatives: data.categories(for: .income).prefix(2).map(\.id),
                     evidence: [Evidence(
                         kind: .refund,
-                        text: "gleicher Betrag wie \(original.title.isEmpty ? MoneyFormat.amount(original.amount) : original.title) vom \(MoneyFormat.day(original.date))",
+                        text: "\(original.amount == draft.amount ? "gleicher" : "fast gleicher") Betrag wie \(original.title.isEmpty ? MoneyFormat.amount(original.amount) : original.title) vom \(MoneyFormat.day(original.date))",
                         strength: 0.55)])
                 continue
             }

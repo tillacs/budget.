@@ -30,12 +30,12 @@ struct RefundLinkSheet: View {
             return haystack.contains(needle)
         }
     }
-    private var exact: [Entry] { matching.filter { $0.amount == entry.amount } }
+    private var exact: [Entry] { matching.filter { $0.amount.roughlyEquals(entry.amount) } }
     private var recent: [Entry] {
-        matching.filter { $0.amount != entry.amount && abs(SuggestionEngine.daysBetween($0.date, entry.date)) <= 90 }
+        matching.filter { !$0.amount.roughlyEquals(entry.amount) && abs(SuggestionEngine.daysBetween($0.date, entry.date)) <= 90 }
     }
     private var older: [Entry] {
-        matching.filter { $0.amount != entry.amount && abs(SuggestionEngine.daysBetween($0.date, entry.date)) > 90 }
+        matching.filter { !$0.amount.roughlyEquals(entry.amount) && abs(SuggestionEngine.daysBetween($0.date, entry.date)) > 90 }
     }
 
     var body: some View {
@@ -56,7 +56,7 @@ struct RefundLinkSheet: View {
                         .listRowBackground(Palette.card)
                 }
                 if !exact.isEmpty {
-                    Section("Gleicher Betrag") {
+                    Section("Passender Betrag") {
                         ForEach(exact) { candidate in pick(candidate) }
                     }
                 }

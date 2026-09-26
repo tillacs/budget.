@@ -254,6 +254,16 @@ nonisolated struct Entry: Identifiable, Hashable, Codable, Sendable {
     }
 }
 
+nonisolated extension Decimal {
+    /// Passen zwei Beträge zusammen? Wer 35 € auslegt und 35,50 € zurückbekommt, hat
+    /// einen Ausgleich, keinen Sonderfall: bis 1 € oder 5 % Unterschied gelten als gleich.
+    func roughlyEquals(_ other: Decimal) -> Bool {
+        let difference = abs(self - other)
+        let tolerance = max(Decimal(1), min(self, other) * Decimal(string: "0.05")!)
+        return difference <= tolerance
+    }
+}
+
 nonisolated extension BudgetCategory {
     /// Die „Kategorie" einer Umbuchung: keine. Umbuchungen tauchen in keinem Ring
     /// und keiner Blase auf, brauchen aber einen Wert im Feld.

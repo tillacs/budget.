@@ -224,6 +224,23 @@ struct ImportPipelineTests {
         #expect(store.summary(for: YearMonth(year: 2026, month: 9)).expenses.total == 35)
     }
 
+    /// Der Vater schickt 50 Cent mehr — trotzdem ein Ausgleich.
+    @Test func ausgleichVerträgtKleineAbweichungen() throws {
+        var data = AppData.seeded()
+        let unterwegs = try category(data, "Unterwegs")
+        data.entries.append(Entry(
+            date: CalendarDate(year: 2026, month: 9, day: 10), amount: 35,
+            direction: .expense, categoryID: unterwegs.id, note: "Zugticket"))
+        let body = transfer("v2", "2026-09-12", "35.500000", "TRANSFER_INBOUND", "Person 1", iban: "DE11100000000000000000")
+        let outcome = ImportPipeline.run(rows: try rows(body), into: data)
+        let eingang = try #require(outcome.data.entries.first { $0.externalID == "v2" })
+        #expect(eingang.kind == .refund)
+        #expect(eingang.suggestion?.reason.contains("fast gleicher") == true)
+        #expect(Decimal(35).roughlyEquals(Decimal(string: "35.5")!))
+        #expect(!Decimal(35).roughlyEquals(Decimal(40)))
+        #expect(Decimal(500).roughlyEquals(Decimal(520)))
+    }
+
     @Test func eigeneIBANZähltAuchOhneNamen() throws {
         var data = AppData.seeded()
         data.ownIBANs = ["DE12100110012625980979"]

@@ -188,7 +188,7 @@ nonisolated enum ImportPipeline {
                     alternatives: data.categories(for: .income).prefix(2).map(\.id),
                     evidence: [Evidence(
                         kind: .refund,
-                        text: "gleicher Betrag wie \(original.title.isEmpty ? MoneyFormat.amount(original.amount) : original.title) vom \(MoneyFormat.day(original.date))",
+                        text: "\(original.amount == draft.amount ? "gleicher" : "fast gleicher") Betrag wie \(original.title.isEmpty ? MoneyFormat.amount(original.amount) : original.title) vom \(MoneyFormat.day(original.date))",
                         strength: 0.55)])
                 append(draft)
                 report.proposed += 1
@@ -338,18 +338,21 @@ nonisolated enum ImportPipeline {
         return !wanted.isEmpty && wanted.allSatisfy(found.contains)
     }
 
-    /// Die Ausgabe, zu der Geld von einer Person passt: exakt derselbe Betrag,
-    /// innerhalb von 30 Tagen davor, noch ohne Ausgleich. Die jüngste gewinnt.
+    /// Die Ausgabe, zu der Geld von einer Person passt: (fast) derselbe Betrag,
+    /// innerhalb von 30 Tagen davor, noch ohne Ausgleich. Exakt schlägt ungefähr,
+    /// dann gewinnt die jüngste.
     static func reimbursementTarget(for inbound: Entry, in data: AppData) -> Entry? {
         let taken = Set(data.entries.compactMap(\.refundOf))
-        return data.entries.filter { original in
+        let candidates = data.entries.filter { original in
             original.kind == .flow && original.direction == .expense
-                && original.amount == inbound.amount
+                && original.amount.roughlyEquals(inbound.amount)
                 && original.date <= inbound.date
                 && SuggestionEngine.daysBetween(original.date, inbound.date) <= 30
                 && !taken.contains(original.id)
         }
-        .max { ($0.date, $0.createdAt) < ($1.date, $1.createdAt) }
+        let exact = candidates.filter { $0.amount == inbound.amount }
+        return (exact.isEmpty ? candidates : exact)
+            .max { ($0.date, $0.createdAt) < ($1.date, $1.createdAt) }
     }
 
     /// Die Ausgabe, die eine Erstattung senkt: gleicher Händler, innerhalb von 90
