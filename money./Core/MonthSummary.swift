@@ -75,7 +75,13 @@ nonisolated struct MonthSummary: Hashable, Sendable {
         categories: [BudgetCategory]
     ) -> MonthSummary {
         let inMonth = entries.filter { $0.month == month }
-        let counting = inMonth.filter(\.counts)
+        // Ein verknüpfter Ausgleich senkt seine Ausgabe — in deren Monat, auch wenn
+        // das Geld erst Wochen später kam. Nur ein Ausgleich ohne Ausgabe steht für sich.
+        var linked: [UUID: Decimal] = [:]
+        for entry in entries where entry.kind == .refund && entry.status != .proposed {
+            if let original = entry.refundOf { linked[original, default: 0] += entry.amount }
+        }
+        let counting = inMonth.filter { $0.counts && !($0.kind == .refund && $0.refundOf != nil) }
         let proposed = inMonth.filter { $0.status == .proposed && $0.kind != .transfer }
         let transfers = inMonth.filter { $0.kind == .transfer }
         let refunds = inMonth.filter { $0.kind == .refund && $0.status != .proposed }
@@ -86,9 +92,9 @@ nonisolated struct MonthSummary: Hashable, Sendable {
         }
         return MonthSummary(
             month: month,
-            expenses: ring(.expense, from: counting, categories: categories),
-            income: ring(.income, from: counting, categories: categories),
-            invested: ring(.invest, from: counting, categories: categories),
+            expenses: ring(.expense, from: counting, categories: categories, linked: linked),
+            income: ring(.income, from: counting, categories: categories, linked: linked),
+            invested: ring(.invest, from: counting, categories: categories, linked: linked),
             pending: pending,
             transferTotal: transfers.reduce(0) { $0 + $1.amount },
             transferCount: transfers.count,
@@ -99,7 +105,8 @@ nonisolated struct MonthSummary: Hashable, Sendable {
     private static func ring(
         _ direction: Direction,
         from entries: [Entry],
-        categories: [BudgetCategory]
+        categories: [BudgetCategory],
+        linked: [UUID: Decimal] = [:]
     ) -> RingSummary {
         let byID = Dictionary(uniqueKeysWithValues: categories.map { ($0.id, $0) })
         var totals: [UUID: (sum: Decimal, count: Int)] = [:]
@@ -111,7 +118,8 @@ nonisolated struct MonthSummary: Hashable, Sendable {
             if entry.kind == .refund {
                 totals[entry.categoryID] = (current.sum - entry.amount, current.count)
             } else {
-                totals[entry.categoryID] = (current.sum + entry.amount, current.count + 1)
+                let net = entry.amount - (linked[entry.id] ?? 0)
+                totals[entry.categoryID] = (current.sum + max(0, net), current.count + 1)
             }
         }
 
@@ -119,8 +127,10 @@ nonisolated struct MonthSummary: Hashable, Sendable {
         // ein negatives Segment gibt es nicht.
         let positive = totals.mapValues { (sum: max(0, $0.sum), count: $0.count) }
         let total = positive.values.reduce(Decimal(0)) { $0 + $1.sum }
+        // Auch eine Kategorie, die nach Ausgleichen bei null steht, bleibt in der
+        // Liste — mit ihren Buchungen und der Null. Nur ganz Leeres fällt weg.
         let slices = positive.compactMap { id, value -> Slice? in
-            guard let category = byID[id], value.sum > 0 else { return nil }
+            guard let category = byID[id], value.sum > 0 || value.count > 0 else { return nil }
             return Slice(
                 category: category,
                 total: value.sum,
@@ -141,7 +151,8 @@ nonisolated extension Array where Element == Entry {
     /// Buchungen einer Kategorie in einem Monat, neueste zuerst. Vorschläge bleiben
     /// draußen — die stehen im Posteingang.
     func of(category id: UUID, in month: YearMonth) -> [Entry] {
-        filter { $0.categoryID == id && $0.month == month && $0.status != .proposed }
+        filter { $0.categoryID == id && $0.month == month && $0.status != .proposed
+            && !($0.kind == .refund && $0.refundOf != nil) }
             .sorted { ($0.date, $0.createdAt) > ($1.date, $1.createdAt) }
     }
 

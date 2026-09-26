@@ -241,6 +241,47 @@ struct ImportPipelineTests {
         #expect(Decimal(500).roughlyEquals(Decimal(520)))
     }
 
+    /// 32 € für zwei bezahlt, 16 € kommen im nächsten Monat zurück: Die Ausgabe steht
+    /// bei 16 € — in ihrem Monat, nicht im Monat des Eingangs.
+    @MainActor @Test func teilausgleichSenktDieAusgabeInIhremMonat() throws {
+        let store = AppStore(data: .seeded(), file: DataFile(
+            fileURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("budget-anteil-\(UUID().uuidString).json")))
+        let essen = try #require(store.data.categories.first { $0.name == "Essen" })
+        let gehalt = try #require(store.data.categories.first { $0.name == "Gehalt" })
+        let dinner = Entry(date: CalendarDate(year: 2026, month: 8, day: 30), amount: 32,
+                           direction: .expense, categoryID: essen.id, note: "Pizza zu zweit")
+        let back = Entry(date: CalendarDate(year: 2026, month: 9, day: 2), amount: 16,
+                         direction: .income, categoryID: gehalt.id, note: "Freund")
+        store.add(dinner)
+        store.add(back)
+
+        store.linkRefund(back.id, to: dinner.id)
+
+        let august = store.summary(for: YearMonth(year: 2026, month: 8))
+        #expect(august.expenses.total == 16)
+        #expect(august.expenses.slices.first?.count == 1)
+        let september = store.summary(for: YearMonth(year: 2026, month: 9))
+        #expect(september.expenses.total == 0)
+        #expect(september.income.total == 0)
+        #expect(september.neutralCount == 1)
+        #expect(store.netAmount(of: dinner) == 16)
+        #expect(store.refunds(of: dinner.id).map(\.id) == [back.id])
+        // In der Kategorienliste steht der Ausgleich nicht mehr für sich.
+        #expect(store.entries(of: essen.id, in: YearMonth(year: 2026, month: 8)).count == 1)
+
+        // Voll ausgeglichen: Die Kategorie bleibt mit ihrer Buchung stehen, bei null.
+        let rest = Entry(date: CalendarDate(year: 2026, month: 9, day: 3), amount: 16,
+                         direction: .income, categoryID: gehalt.id, note: "Freund, Rest")
+        store.add(rest)
+        store.linkRefund(rest.id, to: dinner.id)
+        let balanced = store.summary(for: YearMonth(year: 2026, month: 8))
+        #expect(balanced.expenses.total == 0)
+        #expect(balanced.expenses.slices.first?.category.id == essen.id)
+        #expect(balanced.expenses.slices.first?.count == 1)
+        #expect(store.netAmount(of: dinner) == 0)
+    }
+
     @Test func eigeneIBANZähltAuchOhneNamen() throws {
         var data = AppData.seeded()
         data.ownIBANs = ["DE12100110012625980979"]

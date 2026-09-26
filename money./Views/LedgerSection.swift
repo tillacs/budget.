@@ -136,7 +136,9 @@ struct LedgerSection: View {
     }
 
     private func entryRow(_ entry: Entry, tint: Color) -> some View {
-        HStack(spacing: 12) {
+        let refunds = store.refunds(of: entry.id)
+        let net = store.netAmount(of: entry)
+        return HStack(spacing: 12) {
             Capsule()
                 .fill(tint)
                 .frame(width: 3, height: 22)
@@ -154,14 +156,30 @@ struct LedgerSection: View {
                         .foregroundStyle(Palette.muted)
                         .lineLimit(1)
                 }
+                // Verbunden: Wer die Buchung verringert hat, steht direkt darunter.
+                ForEach(refunds) { refund in
+                    Text("−\(MoneyFormat.amount(refund.amount)) Ausgleich\(refund.title.isEmpty ? "" : " von \(refund.title)"), \(MoneyFormat.day(refund.date))")
+                        .font(.caption2)
+                        .foregroundStyle(Palette.positive)
+                        .lineLimit(1)
+                }
             }
 
             Spacer(minLength: 8)
 
-            Text((entry.kind == .refund ? "+" : "") + MoneyFormat.amount(entry.amount))
-                .font(.subheadline)
-                .monospacedDigit()
-                .foregroundStyle(entry.kind == .refund ? Palette.positive : Palette.muted)
+            VStack(alignment: .trailing, spacing: 0) {
+                Text((entry.kind == .refund ? "+" : "") + MoneyFormat.amount(refunds.isEmpty ? entry.amount : net))
+                    .font(.subheadline.weight(refunds.isEmpty ? .regular : .semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(entry.kind == .refund ? Palette.positive : (refunds.isEmpty ? Palette.muted : Palette.ink))
+                if !refunds.isEmpty {
+                    Text(MoneyFormat.amount(entry.amount))
+                        .font(.caption2)
+                        .monospacedDigit()
+                        .strikethrough()
+                        .foregroundStyle(Palette.faint)
+                }
+            }
 
             Menu {
                 if entry.source == .manual {

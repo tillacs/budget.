@@ -66,6 +66,17 @@ final class AppStore {
         data.entries.recordedMonths.union([month, .current()])
     }
 
+    /// Die Ausgleiche, die an dieser Buchung hängen.
+    func refunds(of original: UUID) -> [Entry] {
+        data.entries.filter { $0.refundOf == original && $0.status != .proposed }
+            .sorted { ($0.date, $0.createdAt) < ($1.date, $1.createdAt) }
+    }
+
+    /// Was von einer Buchung nach allen Ausgleichen übrig ist.
+    func netAmount(of entry: Entry) -> Decimal {
+        max(0, entry.amount - refunds(of: entry.id).reduce(0) { $0 + $1.amount })
+    }
+
     var proposals: [Entry] { data.proposals }
     var hasProposals: Bool { data.entries.contains { $0.status == .proposed } }
 

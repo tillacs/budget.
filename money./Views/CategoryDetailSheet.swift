@@ -20,15 +20,18 @@ struct CategoryDetailSheet: View {
 
     private var tint: Color { Palette.tint(category.tint) }
     private var entries: [Entry] { store.entries(of: category.id, in: month) }
-    private var total: Decimal {
-        entries.reduce(0) { $0 + ($1.kind == .refund ? -$1.amount : $1.amount) }
+    private var total: Decimal { entries.reduce(0) { $0 + net($1) } }
+
+    /// Nach Ausgleichen: Was die Buchung wirklich gekostet hat.
+    private func net(_ entry: Entry) -> Decimal {
+        entry.kind == .refund ? -entry.amount : store.netAmount(of: entry)
     }
 
     private struct MerchantGroup: Identifiable {
         let id: String
         let name: String
         let entries: [Entry]
-        var total: Decimal { entries.reduce(0) { $0 + ($1.kind == .refund ? -$1.amount : $1.amount) } }
+        var total: Decimal = 0
     }
 
     private var groups: [MerchantGroup] {
@@ -43,7 +46,7 @@ struct CategoryDetailSheet: View {
         return order.map { key in
             let list = buckets[key] ?? []
             let name = list.first.map { $0.title.isEmpty ? "Ohne Namen" : $0.title } ?? key
-            return MerchantGroup(id: key, name: name, entries: list)
+            return MerchantGroup(id: key, name: name, entries: list, total: list.reduce(0) { $0 + net($1) })
         }
         .sorted { $0.total > $1.total }
     }
@@ -187,17 +190,37 @@ struct CategoryDetailSheet: View {
     }
 
     private func entryRow(_ entry: Entry) -> some View {
-        HStack(spacing: 10) {
+        let refunds = store.refunds(of: entry.id)
+        return HStack(spacing: 10) {
             Capsule().fill(tint).frame(width: 3, height: 20)
-            Text(MoneyFormat.day(entry.date))
-                .font(.subheadline)
-                .foregroundStyle(Palette.ink)
-            EntryMarks(entry: entry)
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 6) {
+                    Text(MoneyFormat.day(entry.date))
+                        .font(.subheadline)
+                        .foregroundStyle(Palette.ink)
+                    EntryMarks(entry: entry)
+                }
+                ForEach(refunds) { refund in
+                    Text("−\(MoneyFormat.amount(refund.amount)) Ausgleich\(refund.title.isEmpty ? "" : " von \(refund.title)"), \(MoneyFormat.day(refund.date))")
+                        .font(.caption2)
+                        .foregroundStyle(Palette.positive)
+                        .lineLimit(1)
+                }
+            }
             Spacer(minLength: 6)
-            Text((entry.kind == .refund ? "+" : "") + MoneyFormat.amount(entry.amount))
-                .font(.subheadline)
-                .monospacedDigit()
-                .foregroundStyle(entry.kind == .refund ? Palette.positive : Palette.muted)
+            VStack(alignment: .trailing, spacing: 0) {
+                Text((entry.kind == .refund ? "+" : "") + MoneyFormat.amount(refunds.isEmpty ? entry.amount : store.netAmount(of: entry)))
+                    .font(.subheadline.weight(refunds.isEmpty ? .regular : .semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(entry.kind == .refund ? Palette.positive : (refunds.isEmpty ? Palette.muted : Palette.ink))
+                if !refunds.isEmpty {
+                    Text(MoneyFormat.amount(entry.amount))
+                        .font(.caption2)
+                        .monospacedDigit()
+                        .strikethrough()
+                        .foregroundStyle(Palette.faint)
+                }
+            }
             Menu {
                 Button { pickerFor = entry } label: { Label("Kategorie ändern", systemImage: "tag") }
                 if entry.kind == .refund, entry.refundOf != nil {
