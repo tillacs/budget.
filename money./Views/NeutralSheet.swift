@@ -12,6 +12,7 @@ struct NeutralSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var showsAdd = false
+    @State private var linkFor: Entry?
 
     private var transfers: [Entry] {
         store.data.entries
@@ -90,6 +91,9 @@ struct NeutralSheet: View {
         .sheet(isPresented: $showsAdd) {
             NeutralAddSheet(store: store, month: month)
         }
+        .sheet(item: $linkFor) { entry in
+            RefundLinkSheet(store: store, entry: entry)
+        }
     }
 
     private func row(_ entry: Entry) -> some View {
@@ -121,6 +125,17 @@ struct NeutralSheet: View {
                 if entry.kind == .refund {
                     Button { store.unlinkRefund(entry.id) } label: {
                         Label("Ausgleich lösen", systemImage: "arrow.uturn.forward")
+                    }
+                } else {
+                    // Eine Umbuchung, die in Wahrheit eine Ausgabe verringert: direkt der
+                    // Buchung zuordnen, nicht einer Kategorie.
+                    if entry.isInflow {
+                        Button { linkFor = entry } label: {
+                            Label("Als Ausgleich einer Ausgabe zuordnen …", systemImage: "arrow.uturn.backward")
+                        }
+                    }
+                    Button { store.restoreFromNeutral(entry.id) } label: {
+                        Label("Doch zählen — Kategorie wählen", systemImage: "tag")
                     }
                 }
                 Button(role: .destructive) { store.deleteEntry(entry.id) } label: {

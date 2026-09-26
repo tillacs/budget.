@@ -234,6 +234,23 @@ final class AppStore {
         persist()
     }
 
+    /// Eine Umbuchung soll doch zählen: zurück in den Posteingang, mit dem echten
+    /// Vorzeichen, damit dort die passende Seite zur Wahl steht.
+    func restoreFromNeutral(_ id: UUID) {
+        guard let i = data.entries.firstIndex(where: { $0.id == id }),
+              data.entries[i].kind == .transfer else { return }
+        var entry = data.entries[i]
+        let inflow = entry.isInflow
+        entry.kind = .flow
+        entry.direction = inflow ? .income : .expense
+        entry.status = .proposed
+        entry.categoryID = data.categories(for: entry.direction).first?.id ?? BudgetCategory.noneID
+        entry.suggestion = Suggestion(categoryID: entry.categoryID, confidence: 0)
+        data.entries[i] = entry
+        rerankProposals()
+        persist()
+    }
+
     /// Den Ausgleich wieder lösen: Die Buchung wird zur offenen Einnahme.
     func unlinkRefund(_ id: UUID) {
         guard let i = data.entries.firstIndex(where: { $0.id == id }),
@@ -261,10 +278,10 @@ final class AppStore {
             guard other.id != entry.id, other.kind == .flow,
                   other.status != .proposed || other.source == .tradeRepublic
             else { return false }
-            if entry.direction == .income {
-                return other.direction != .income && !taken.contains(other.id)
+            if entry.isInflow {
+                return !other.isInflow && !taken.contains(other.id)
             } else {
-                return other.direction == .income && other.refundOf == nil
+                return other.isInflow && other.refundOf == nil
             }
         }
         func distance(_ other: Entry) -> Int {

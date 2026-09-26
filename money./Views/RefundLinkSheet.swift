@@ -16,7 +16,7 @@ struct RefundLinkSheet: View {
     @State private var query = ""
 
     private var candidates: [Entry] { store.refundCandidates(for: entry) }
-    private var isInbound: Bool { entry.direction == .income }
+    private var isInbound: Bool { entry.isInflow }
 
     /// Suche über Name, Notiz, Kategorie und Betrag — „DB" findet die Bahn.
     private var matching: [Entry] {

@@ -320,8 +320,13 @@ struct LedgerSection: View {
                         Label("Ausgleich lösen", systemImage: "arrow.uturn.forward")
                     }
                 } else {
-                    Button { onRecategorize(entry) } label: {
-                        Label("Doch zählen — Kategorie wählen", systemImage: "tag")
+                    if entry.isInflow {
+                        Button { onLink(entry) } label: {
+                            Label("Als Ausgleich einer Ausgabe zuordnen …", systemImage: "arrow.uturn.backward")
+                        }
+                    }
+                    Button { store.restoreFromNeutral(entry.id) } label: {
+                        Label("Doch zählen — in den Posteingang", systemImage: "tray")
                     }
                 }
                 Button(role: .destructive) { store.deleteEntry(entry.id) } label: {
