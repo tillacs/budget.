@@ -13,6 +13,7 @@ struct NeutralSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showsAdd = false
     @State private var linkFor: Entry?
+    @State private var pickerFor: Entry?
 
     private var transfers: [Entry] {
         store.data.entries
@@ -94,6 +95,13 @@ struct NeutralSheet: View {
         .sheet(item: $linkFor) { entry in
             RefundLinkSheet(store: store, entry: entry)
         }
+        // Kategorie wählen löst Ausgleich oder Umbuchung von selbst.
+        .sheet(item: $pickerFor) { entry in
+            CategoryPickerSheet(
+                store: store, direction: entry.direction, current: nil,
+                allowed: entry.compatibleDirections, title: "Doch zählen als …"
+            ) { store.correct(entry.id, to: $0) }
+        }
     }
 
     private func row(_ entry: Entry) -> some View {
@@ -124,9 +132,15 @@ struct NeutralSheet: View {
                 .monospacedDigit()
                 .foregroundStyle(Palette.muted)
             Menu {
+                Button { pickerFor = entry } label: {
+                    Label("Kategorie ändern", systemImage: "tag")
+                }
                 if entry.kind == .refund {
+                    Button { linkFor = entry } label: {
+                        Label("Andere Ausgabe ausgleichen …", systemImage: "arrow.uturn.backward")
+                    }
                     Button { store.unlinkRefund(entry.id) } label: {
-                        Label("Ausgleich lösen", systemImage: "arrow.uturn.forward")
+                        Label("Ausgleich lösen → Posteingang", systemImage: "tray")
                     }
                 } else {
                     // Eine Umbuchung, die in Wahrheit eine Ausgabe verringert: direkt der

@@ -351,9 +351,15 @@ struct LedgerSection: View {
                 .monospacedDigit()
                 .foregroundStyle(Palette.muted)
             Menu {
+                Button { onRecategorize(entry) } label: {
+                    Label("Kategorie ändern", systemImage: "tag")
+                }
                 if entry.kind == .refund {
+                    Button { onLink(entry) } label: {
+                        Label("Andere Ausgabe ausgleichen …", systemImage: "arrow.uturn.backward")
+                    }
                     Button { store.unlinkRefund(entry.id) } label: {
-                        Label("Ausgleich lösen", systemImage: "arrow.uturn.forward")
+                        Label("Ausgleich lösen → Posteingang", systemImage: "tray")
                     }
                 } else {
                     if entry.isInflow {

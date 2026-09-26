@@ -401,6 +401,29 @@ struct ImportPipelineTests {
         #expect(summary.income.slices.first?.category.isSurplus == true)
     }
 
+    /// Kategorie wählen löst den Ausgleich von selbst — die Buchung wird Einnahme.
+    @MainActor @Test func kategorieWählenLöstDenAusgleich() throws {
+        let store = AppStore(data: .seeded(), file: DataFile(
+            fileURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("budget-loesen-\(UUID().uuidString).json")))
+        let essen = try #require(store.data.categories.first { $0.name == "Essen" })
+        let gehalt = try #require(store.data.categories.first { $0.name == "Gehalt" })
+        let pizza = Entry(amount: 32, direction: .expense, categoryID: essen.id, note: "Pizza")
+        let back = Entry(amount: 16, direction: .income, categoryID: gehalt.id, note: "Freund", inflow: true)
+        store.add(pizza); store.add(back)
+        store.linkRefund(back.id, to: pizza.id)
+        #expect(store.netAmount(of: pizza) == 16)
+
+        store.correct(back.id, to: gehalt.id)
+        let entry = try #require(store.entry(back.id))
+        #expect(entry.kind == .flow)
+        #expect(entry.refundOf == nil)
+        #expect(entry.direction == .income)
+        #expect(entry.status == .confirmed)
+        #expect(store.netAmount(of: pizza) == 32)
+        #expect(store.summary(for: .current()).income.total == 16)
+    }
+
     @Test func eigeneIBANZähltAuchOhneNamen() throws {
         var data = AppData.seeded()
         data.ownIBANs = ["DE12100110012625980979"]
