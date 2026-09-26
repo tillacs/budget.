@@ -14,6 +14,9 @@ struct RefundLinkSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
+    /// „Passend" sortiert nach Betrag und Nähe; „Verlauf" ist die reine Zeitleiste.
+    @State private var mode: Mode = .matching
+    private enum Mode: Hashable { case matching, history }
 
     private var candidates: [Entry] { store.refundCandidates(for: entry) }
     private var isInbound: Bool { entry.isInflow }
@@ -38,12 +41,36 @@ struct RefundLinkSheet: View {
         matching.filter { !$0.amount.roughlyEquals(entry.amount) && abs(SuggestionEngine.daysBetween($0.date, entry.date)) > 90 }
     }
 
+    /// Der Verlauf: nach Datum, neueste zuerst, in Monaten.
+    private struct MonthGroup: Identifiable {
+        let month: YearMonth
+        let entries: [Entry]
+        var id: YearMonth { month }
+    }
+    private var byMonth: [MonthGroup] {
+        let sorted = matching.sorted { ($0.date, $0.createdAt) > ($1.date, $1.createdAt) }
+        var order: [YearMonth] = []
+        var buckets: [YearMonth: [Entry]] = [:]
+        for item in sorted {
+            if buckets[item.month] == nil { order.append(item.month) }
+            buckets[item.month, default: []].append(item)
+        }
+        return order.map { MonthGroup(month: $0, entries: buckets[$0] ?? []) }
+    }
+
     var body: some View {
         NavigationStack {
             List {
                 Section {
                     row(entry, highlighted: true)
                         .listRowBackground(Palette.card)
+                    Picker("Sortierung", selection: $mode) {
+                        Text("Passend").tag(Mode.matching)
+                        Text("Verlauf").tag(Mode.history)
+                    }
+                    .pickerStyle(.segmented)
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
                 } header: {
                     Text(isInbound ? "Dieser Eingang gleicht aus …" : "Diese Ausgabe wird ausgeglichen durch …")
                 }
@@ -55,19 +82,27 @@ struct RefundLinkSheet: View {
                         .foregroundStyle(Palette.muted)
                         .listRowBackground(Palette.card)
                 }
-                if !exact.isEmpty {
-                    Section("Passender Betrag") {
-                        ForEach(exact) { candidate in pick(candidate) }
+                if mode == .history {
+                    ForEach(byMonth) { group in
+                        Section(MoneyFormat.month(group.month)) {
+                            ForEach(group.entries) { candidate in pick(candidate) }
+                        }
                     }
-                }
-                if !recent.isEmpty {
-                    Section("Davor und danach, 90 Tage") {
-                        ForEach(recent) { candidate in pick(candidate) }
+                } else {
+                    if !exact.isEmpty {
+                        Section("Passender Betrag") {
+                            ForEach(exact) { candidate in pick(candidate) }
+                        }
                     }
-                }
-                if !older.isEmpty {
-                    Section("Weiter entfernt") {
-                        ForEach(older.prefix(query.isEmpty ? 60 : 300)) { candidate in pick(candidate) }
+                    if !recent.isEmpty {
+                        Section("Davor und danach, 90 Tage") {
+                            ForEach(recent) { candidate in pick(candidate) }
+                        }
+                    }
+                    if !older.isEmpty {
+                        Section("Weiter entfernt") {
+                            ForEach(older.prefix(query.isEmpty ? 60 : 300)) { candidate in pick(candidate) }
+                        }
                     }
                 }
             }
@@ -86,6 +121,7 @@ struct RefundLinkSheet: View {
         }
         .tint(Palette.accent)
         .presentationDetents([.large])
+        .sensoryFeedback(.selection, trigger: mode)
     }
 
     private func pick(_ candidate: Entry) -> some View {
