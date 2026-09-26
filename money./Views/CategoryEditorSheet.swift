@@ -89,17 +89,10 @@ struct CategoryEditorSheet: View {
         } message: {
             Text("Die Kategorie ist leer. Das lässt sich nicht rückgängig machen.")
         }
-        // Mit Buchungen: erst das Ziel wählen, dann wird alles auf einmal umgebucht.
+        // Mit Buchungen: auflösen — einzeln umordnen oder alle auf einmal.
         .sheet(isPresented: $showsMovePicker) {
             if let editing {
-                CategoryPickerSheet(
-                    store: store, direction: editing.direction, current: nil, exclude: editing.id,
-                    allowed: Direction.compatible(with: editing.direction),
-                    title: "\(entryCount) Buchungen umbuchen nach …"
-                ) { target in
-                    store.deleteCategory(editing.id, movingEntriesTo: target)
-                    dismiss()
-                }
+                DissolveCategorySheet(store: store, category: editing) { dismiss() }
             }
         }
     }
@@ -235,7 +228,7 @@ struct CategoryEditorSheet: View {
         Button(role: .destructive) {
             if entryCount > 0 { showsMovePicker = true } else { showsDeleteConfirmation = true }
         } label: {
-            Text(entryCount > 0 ? "Löschen und \(entryCount) Buchungen umbuchen …" : "Kategorie löschen")
+            Text(entryCount > 0 ? "Auflösen — \(entryCount) Buchungen umordnen …" : "Kategorie löschen")
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(Palette.negative)
                 .frame(maxWidth: .infinity, minHeight: 48)
