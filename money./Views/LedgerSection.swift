@@ -24,6 +24,7 @@ struct LedgerSection: View {
     let onEdit: (Entry) -> Void
     var onRecategorize: (Entry) -> Void = { _ in }
     var onLink: (Entry) -> Void = { _ in }
+    var onHistory: () -> Void = {}
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showsTransfers = false
@@ -44,6 +45,7 @@ struct LedgerSection: View {
                 }
             }
             if neutralCount > 0 { neutralRow }
+            historyRow
         }
         .animation(motion, value: expanded)
         .animation(motion, value: ring)
@@ -227,6 +229,33 @@ struct LedgerSection: View {
         .padding(.leading, Metrics.cardPadding + 6)
         .padding(.trailing, Metrics.cardPadding - 6)
         .padding(.vertical, 7)
+    }
+
+    // MARK: - Verlauf
+
+    /// Der Kontoauszug des Monats: alles chronologisch, mit Zuordnung.
+    private var historyRow: some View {
+        let count = store.data.entries.filter { $0.month == month }.count
+        return Button(action: onHistory) {
+            HStack(spacing: 10) {
+                Image(systemName: "list.bullet.rectangle")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Palette.faint)
+                Text("Verlauf")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Palette.muted)
+                if count > 0 { CountChip(count: count) }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Palette.faint)
+            }
+            .padding(.horizontal, Metrics.cardPadding)
+            .padding(.vertical, 12)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressableRowStyle())
+        .accessibilityLabel("Verlauf: alle \(count) Buchungen des Monats")
     }
 
     // MARK: - Neutral

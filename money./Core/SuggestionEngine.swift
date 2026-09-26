@@ -44,10 +44,12 @@ nonisolated enum SuggestionEngine {
         case "INTEREST_PAYMENT": return (.income, ["Kapitalerträge", "Zinsen"], "Zinsen", 0.95)
         case "DIVIDEND": return (.income, ["Kapitalerträge", "Dividenden"], "Dividende", 0.95)
         case "BENEFITS_SAVEBACK": return (.income, ["Saveback"], "Saveback-Gutschrift", 0.95)
+        case "BENEFITS_ROUNDUP": return (.income, ["Round-up"], "Round-up-Gutschrift", 0.95)
         case "BUY_SAVINGS_PLAN": return (.invest, ["Sparplan"], "Sparplan-Ausführung", 0.90)
         case "BUY_SAVEBACK": return (.invest, ["Saveback"], "mit Saveback angelegt", 0.90)
-        case "BUY", "IPO_SUBSCRIPTION": return (.invest, ["Einzelkauf"], "Einzelkauf", 0.85)
-        case "SELL": return (.invest, ["Einzelkauf", "Sparplan"], "Verkauf", 0.50)
+        case "BUY_ROUNDUP": return (.invest, ["Round-up"], "mit Round-up angelegt", 0.90)
+        case "BUY", "IPO_SUBSCRIPTION": return (.invest, ["Kauf", "Einzelkauf"], "Kauf", 0.85)
+        case "SELL": return (.invest, ["Kauf", "Einzelkauf", "Sparplan"], "Verkauf", 0.50)
         default: return nil
         }
     }

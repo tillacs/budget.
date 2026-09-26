@@ -46,16 +46,28 @@ nonisolated enum ImportPipeline {
         var known = Set(data.entries.compactMap(\.externalID)).union(data.ignoredExternalIDs)
         var index = Dictionary(uniqueKeysWithValues: data.entries.enumerated().map { ($1.id, $0) })
 
-        // Saveback: Gutschrift und Kauf am selben Tag über denselben Betrag und
-        // dieselbe ISIN gehören zusammen. Vorab gesucht, weil die Reihenfolge im
-        // Export nicht festliegt.
-        let savebackByKey = Dictionary(
-            rows.filter { $0.type == "BENEFITS_SAVEBACK" && !$0.symbol.isEmpty }
-                .map { (pairKey($0), $0.transactionID) },
-            uniquingKeysWith: { first, _ in first })
+        // Saveback und Round-up: Die Gutschrift kommt zuerst, der Kauf folgt in den
+        // Tagen danach — gleicher Betrag, dieselbe ISIN, falls die Gutschrift eine
+        // nennt. Vorab gesucht, weil die Reihenfolge im Export nicht festliegt.
         var savebackBuys: [String: String] = [:]   // Kauf-ID → Gutschrift-ID
-        for row in rows where row.type == "BUY" {
-            if let credit = savebackByKey[pairKey(row)] { savebackBuys[row.transactionID] = credit }
+        var buyKind: [String: String] = [:]        // Kauf-ID → "BUY_SAVEBACK" / "BUY_ROUNDUP"
+        let credits = rows.filter { isBenefit($0.type) && ($0.amount ?? 0) > 0 }
+        let buys = rows.filter { $0.type == "BUY" }
+        var takenBuys: Set<String> = []
+        for credit in credits.sorted(by: { $0.datetime < $1.datetime }) {
+            let match = buys.first { buy in
+                guard !takenBuys.contains(buy.transactionID),
+                      let a = buy.amount, let c = credit.amount, abs(a) == c,
+                      buy.date >= credit.date,
+                      SuggestionEngine.daysBetween(credit.date, buy.date) <= 5
+                else { return false }
+                return credit.symbol.isEmpty || credit.symbol == buy.symbol
+            }
+            if let match {
+                takenBuys.insert(match.transactionID)
+                savebackBuys[match.transactionID] = credit.transactionID
+                buyKind[match.transactionID] = credit.type.contains("ROUND") ? "BUY_ROUNDUP" : "BUY_SAVEBACK"
+            }
         }
 
         let ordered = rows.sorted { ($0.datetime, $0.transactionID) < ($1.datetime, $1.transactionID) }
@@ -169,7 +181,7 @@ nonisolated enum ImportPipeline {
                 }
                 if draft.direction == .invest {
                     // Verkauf ohne bekannten Kauf: das Wertpapier kennt seine Kategorie vielleicht.
-                    ensure(&data, .invest, "Einzelkauf", "🧾", .sand)
+                    ensure(&data, .invest, "Kauf", "🧾", .sand)
                 }
             }
 
@@ -197,21 +209,24 @@ nonisolated enum ImportPipeline {
                 continue
             }
 
-            // Saveback-Kauf: die Kategorie „Saveback" im Depot, nicht „Sparplan".
-            if savebackBuys[row.transactionID] != nil {
-                draft.importType = "BUY_SAVEBACK"
-                ensure(&data, .invest, "Saveback", "🎁", .rose)
+            // Saveback- und Round-up-Käufe: eigene Kategorien im Depot, nicht „Sparplan".
+            if let kind = buyKind[row.transactionID] {
+                draft.importType = kind
+            } else if row.type == "BUY", row.description.lowercased().contains("round") {
+                draft.importType = "BUY_ROUNDUP"
             }
             if let prior = SuggestionEngine.typePrior(draft.importType), prior.direction == draft.direction,
                let first = prior.names.first {
                 let symbol: String
+                let tint: CategoryTint
                 switch first {
-                case "Kapitalerträge": symbol = "💹"
-                case "Saveback": symbol = "🎁"
-                case "Sparplan": symbol = "📈"
-                default: symbol = "🧾"
+                case "Kapitalerträge": symbol = "💹"; tint = .mint
+                case "Saveback": symbol = "🎁"; tint = .rose
+                case "Round-up": symbol = "🔄"; tint = .teal
+                case "Sparplan": symbol = "📈"; tint = .indigo
+                default: symbol = "🧾"; tint = .sand
                 }
-                ensure(&data, draft.direction, first, symbol, first == "Kapitalerträge" ? .mint : (first == "Sparplan" ? .indigo : .sand))
+                ensure(&data, draft.direction, first, symbol, tint)
             }
 
             // Die Maschine.
@@ -222,7 +237,7 @@ nonisolated enum ImportPipeline {
             guard let ranking else {
                 // Keine Kategorie in dieser Richtung — kann bei einer alten Datei
                 // ohne Investiert-Bereich passieren. Dann wird eine angelegt.
-                ensure(&data, draft.direction, draft.direction == .invest ? "Einzelkauf" : "Sonstiges", "🧾", .slate)
+                ensure(&data, draft.direction, draft.direction == .invest ? "Kauf" : "Sonstiges", "🧾", .slate)
                 let fallback = data.categories(for: draft.direction)[0]
                 draft.categoryID = fallback.id
                 draft.suggestion = Suggestion(categoryID: fallback.id, confidence: 0)
@@ -297,6 +312,9 @@ nonisolated enum ImportPipeline {
         case "INTEREST_PAYMENT", "DIVIDEND", "BENEFITS_SAVEBACK":
             return Shape(direction: .income, kind: .flow,
                          merchant: row.name.isEmpty ? nil : row.name, importType: row.type)
+        case let type where type.contains("ROUND") && inflow:
+            return Shape(direction: .income, kind: .flow,
+                         merchant: row.name.isEmpty ? nil : row.name, importType: "BENEFITS_ROUNDUP")
         case "TRANSFER_INBOUND", "TRANSFER_INSTANT_INBOUND":
             var shape = Shape(direction: inflow ? .income : .expense, kind: .flow,
                               merchant: counterparty, importType: row.type)
@@ -381,8 +399,9 @@ nonisolated enum ImportPipeline {
         return pool.max { ($0.date, $0.createdAt) < ($1.date, $1.createdAt) }
     }
 
-    private static func pairKey(_ row: Row) -> String {
-        "\(row.date.year)-\(row.date.month)-\(row.date.day)|\(row.symbol)|\(abs(row.amount ?? 0))"
+    /// Gutschriften, die Trade Republic für das Depot bezahlt: Saveback, Round-up.
+    static func isBenefit(_ type: String) -> Bool {
+        type == "BENEFITS_SAVEBACK" || type.contains("ROUND")
     }
 
     /// Legt eine Kategorie an, falls es sie in dieser Richtung nicht gibt.

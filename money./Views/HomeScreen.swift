@@ -18,6 +18,7 @@ enum HomeSheet: Identifiable, Hashable {
     case report
     case link(Entry)
     case neutral
+    case history
 
     var id: String {
         switch self {
@@ -28,6 +29,7 @@ enum HomeSheet: Identifiable, Hashable {
         case .report: return "bericht"
         case .link(let entry): return "ausgleich-\(entry.id)"
         case .neutral: return "neutral"
+        case .history: return "verlauf"
         }
     }
 }
@@ -178,7 +180,8 @@ struct HomeScreen: View {
                         expanded: $expanded,
                         onEdit: { sheet = .edit($0) },
                         onRecategorize: { pickerFor = $0 },
-                        onLink: { sheet = .link($0) })
+                        onLink: { sheet = .link($0) },
+                        onHistory: { sheet = .history })
                 }
                 .padding(.horizontal, Metrics.screenInset)
                 .padding(.top, 10)
@@ -467,6 +470,8 @@ struct HomeScreen: View {
             RefundLinkSheet(store: store, entry: entry)
         case .neutral:
             NeutralSheet(store: store, month: month)
+        case .history:
+            HistorySheet(store: store, month: month)
         case .report:
             if let report {
                 ImportReportSheet(report: report) {

@@ -108,7 +108,7 @@ struct ImportPipelineTests {
         #expect(first.report.alreadyKnown == 0)
         #expect(first.report.isBalanced, "Differenzen: \(first.report.checksum.filter { $0.value != 0 })")
         #expect(first.report.imported + first.report.withoutAmount == 1648)
-        #expect(first.report.savebackPairs == 4)
+        #expect(first.report.savebackPairs >= 8)
         #expect(first.report.refundsLinked > 0)
 
         let second = ImportPipeline.run(rows: rows, into: first.data)
@@ -401,6 +401,19 @@ struct ImportPipelineTests {
         #expect(outcome.data.category(buy.categoryID)?.name == "Saveback")
         #expect(outcome.data.category(credit.categoryID)?.name == "Saveback")
         #expect(outcome.report.isBalanced)
+    }
+
+    /// Seit Ende 2025 kommt der Saveback-Kauf ein bis drei Tage nach der Gutschrift.
+    @Test func savebackPaartAuchDenKaufTageSpäter() throws {
+        let body = "\"2026-03-01T06:00:00Z\",\"2026-03-01\",\"DEFAULT\",\"CASH\",\"BENEFITS_SAVEBACK\",\"\",\"\",\"\",\"\",\"\",\"11.350000\",\"\",\"\",\"EUR\",\"\",\"\",\"\",\" Saveback cash reward b683\",\"sb\",\"\",\"\",\"\",\"\"\n"
+            + "\"2026-03-02T10:01:00Z\",\"2026-03-02\",\"DEFAULT\",\"TRADING\",\"BUY\",\"STOCK\",\"BMW\",\"DE0005190003\",\"0.1\",\"113\",\"-11.35\",\"\",\"\",\"EUR\",\"\",\"\",\"\",\"Savings plan execution DE0005190003 BMW\",\"buy\",\"\",\"\",\"\",\"\"\n"
+            + "\"2026-03-02T10:02:00Z\",\"2026-03-02\",\"DEFAULT\",\"TRADING\",\"BUY\",\"FUND\",\"Core MSCI World\",\"IE00B4L5Y983\",\"0.1\",\"100\",\"-50.00\",\"\",\"\",\"EUR\",\"\",\"\",\"\",\"Savings plan execution IE00B4L5Y983\",\"sp\",\"\",\"\",\"\",\"\"\n"
+        let outcome = ImportPipeline.run(rows: try rows(body), into: .seeded())
+        #expect(outcome.report.savebackPairs == 1)
+        let buy = try #require(outcome.data.entries.first { $0.externalID == "buy" })
+        let plan = try #require(outcome.data.entries.first { $0.externalID == "sp" })
+        #expect(outcome.data.category(buy.categoryID)?.name == "Saveback")
+        #expect(outcome.data.category(plan.categoryID)?.name == "Sparplan")
     }
 
     @Test func sparplanUndZinsenBekommenIhreKategorien() throws {

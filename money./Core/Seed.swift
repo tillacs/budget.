@@ -32,9 +32,11 @@ nonisolated enum Seed {
             make("Gehalt", "💼", .mint, .income),
             make("Kapitalerträge", "💹", .teal, .income),
             make("Saveback", "🎁", .rose, .income),
+            make("Round-up", "🔄", .teal, .income),
             make("Sonstiges", "✨", .sky, .income),
             make("Sparplan", "📈", .indigo, .invest),
-            make("Einzelkauf", "🧾", .sand, .invest),
+            make("Kauf", "🧾", .sand, .invest),
+            make("Round-up", "🔄", .teal, .invest),
             make("Saveback", "🎁", .rose, .invest),
         ]
     }
