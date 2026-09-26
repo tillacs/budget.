@@ -80,7 +80,7 @@ nonisolated enum BubbleLayout {
         let sum = values.reduce(0, +)
         let usable = Double(size.width * size.height) * (focused ? 0.58 : 0.52)
         let k = sum > 0 ? sqrt(usable / (.pi * sum)) : 1
-        let maxRadius = Double(min(size.width, size.height)) * (focused ? 0.4 : 0.34)
+        let maxRadius = Double(min(size.width, size.height)) * (focused ? 0.36 : 0.34)
         let minRadius = 16.0
 
         var radii: [Double] = values.map { min(maxRadius, max(minRadius, k * sqrt($0))) }
