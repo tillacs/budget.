@@ -85,6 +85,18 @@ nonisolated struct MonthSummary: Hashable, Sendable {
         let proposed = inMonth.filter { $0.status == .proposed && $0.kind != .transfer }
         let transfers = inMonth.filter { $0.kind == .transfer }
         let refunds = inMonth.filter { $0.kind == .refund && $0.status != .proposed }
+        // Offenes zählt als „Unbekannt" mit — nach dem echten Geldfluss: Was reinkam,
+        // ist unbekannte Einnahme, was rausging, unbekannte Ausgabe oder Anlage.
+        let unknowns: [Entry] = proposed.map { entry in
+            var copy = entry
+            copy.kind = .flow
+            copy.refundOf = nil
+            copy.direction = entry.isInflow ? .income : (entry.direction == .invest ? .invest : .expense)
+            copy.categoryID = BudgetCategory.unknown(for: copy.direction).id
+            return copy
+        }
+        let all = counting + unknowns
+        let withUnknown = categories + Direction.allCases.map { BudgetCategory.unknown(for: $0) }
         var pending: [Direction: [Slice]] = [:]
         for direction in Direction.allCases {
             let slices = ring(direction, from: proposed, categories: categories).slices
@@ -92,9 +104,9 @@ nonisolated struct MonthSummary: Hashable, Sendable {
         }
         return MonthSummary(
             month: month,
-            expenses: ring(.expense, from: counting, categories: categories, linked: linked),
-            income: ring(.income, from: counting, categories: categories, linked: linked),
-            invested: ring(.invest, from: counting, categories: categories, linked: linked),
+            expenses: ring(.expense, from: all, categories: withUnknown, linked: linked),
+            income: ring(.income, from: all, categories: withUnknown, linked: linked),
+            invested: ring(.invest, from: all, categories: withUnknown, linked: linked),
             pending: pending,
             transferTotal: transfers.reduce(0) { $0 + $1.amount },
             transferCount: transfers.count,
@@ -139,8 +151,10 @@ nonisolated struct MonthSummary: Hashable, Sendable {
         }
         // Größtes Segment zuerst: Der Ring beginnt oben mit dem, was am meisten wiegt,
         // und die Liste darunter hat dieselbe Reihenfolge wie die Grafik.
+        // Größtes zuerst; Unbekannt steht bei gleicher Größe hinten.
         .sorted {
-            $0.total == $1.total ? $0.category.name < $1.category.name : $0.total > $1.total
+            if $0.category.isUnknown != $1.category.isUnknown { return !$0.category.isUnknown }
+            return $0.total == $1.total ? $0.category.name < $1.category.name : $0.total > $1.total
         }
 
         return RingSummary(direction: direction, total: total, slices: slices)

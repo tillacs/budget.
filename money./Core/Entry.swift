@@ -288,6 +288,22 @@ nonisolated extension Decimal {
 }
 
 nonisolated extension BudgetCategory {
+    /// „Unbekannt": alles, was noch im Posteingang liegt, zählt hier mit — je Seite
+    /// eine feste Pseudo-Kategorie, damit Summen und Blasen schon stimmen, bevor
+    /// jede Buchung ihren Platz hat.
+    static func unknown(for direction: Direction) -> BudgetCategory {
+        let id: UUID
+        switch direction {
+        case .expense: id = UUID(uuidString: "00000000-0000-0000-0000-00000000000E")!
+        case .income: id = UUID(uuidString: "00000000-0000-0000-0000-00000000000A")!
+        case .invest: id = UUID(uuidString: "00000000-0000-0000-0000-00000000000B")!
+        }
+        return BudgetCategory(id: id, name: "Unbekannt", symbol: "?", tint: .slate, direction: direction, sortIndex: 999)
+    }
+
+    static let unknownIDs: Set<UUID> = Set(Direction.allCases.map { unknown(for: $0).id })
+    var isUnknown: Bool { BudgetCategory.unknownIDs.contains(id) }
+
     /// Die „Kategorie" einer Umbuchung: keine. Umbuchungen tauchen in keinem Ring
     /// und keiner Blase auf, brauchen aber einen Wert im Feld.
     static let noneID = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!

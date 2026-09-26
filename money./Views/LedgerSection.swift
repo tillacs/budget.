@@ -25,6 +25,7 @@ struct LedgerSection: View {
     var onRecategorize: (Entry) -> Void = { _ in }
     var onLink: (Entry) -> Void = { _ in }
     var onHistory: () -> Void = {}
+    var onInbox: () -> Void = {}
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showsTransfers = false
@@ -117,7 +118,7 @@ struct LedgerSection: View {
         .accessibilityLabel(
             "\(slice.category.name), \(MoneyFormat.amount(slice.total)), "
                 + "\(MoneyFormat.share(slice.share)) der \(ring.direction.plural)")
-        .accessibilityHint(expanded == slice.id ? "Buchungen ausblenden" : "Buchungen anzeigen")
+        .accessibilityHint(slice.category.isUnknown ? "Öffnet den Posteingang" : (expanded == slice.id ? "Buchungen ausblenden" : "Buchungen anzeigen"))
     }
 
     private func shareBar(_ slice: Slice) -> some View {
@@ -382,6 +383,8 @@ struct LedgerSection: View {
     // MARK: - Ablauf
 
     private func toggle(_ slice: Slice) {
+        // Unbekannt klappt nicht auf — es führt in den Posteingang, wo es sich klärt.
+        if slice.category.isUnknown { onInbox(); return }
         withAnimation(motion) {
             if expanded == slice.id {
                 expanded = nil

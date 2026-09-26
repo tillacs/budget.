@@ -181,7 +181,8 @@ struct HomeScreen: View {
                         onEdit: { sheet = .edit($0) },
                         onRecategorize: { pickerFor = $0 },
                         onLink: { sheet = .link($0) },
-                        onHistory: { sheet = .history })
+                        onHistory: { sheet = .history },
+                        onInbox: { sheet = .inbox })
                 }
                 .padding(.horizontal, Metrics.screenInset)
                 .padding(.top, 10)
@@ -256,7 +257,7 @@ struct HomeScreen: View {
         BubbleField(
             summary: summary,
             direction: listDirection,
-            onTap: { sheet = .detail($0.category.id) },
+            onTap: { sheet = $0.category.isUnknown ? .inbox : .detail($0.category.id) },
             onPendingTap: { sheet = .inbox },
             onNeutralTap: { sheet = .neutral })
             .frame(height: 340)

@@ -187,7 +187,9 @@ struct ImportPipelineTests {
         #expect(fremd.status == .proposed)
         let summary = MonthSummary.make(month: YearMonth(year: 2026, month: 7), entries: outcome.data.entries, categories: outcome.data.categories)
         #expect(summary.transferTotal == 1620)
-        #expect(summary.expenses.total == 0)
+        // Das Offene zählt schon mit — als Unbekannt.
+        #expect(summary.expenses.total == 97)
+        #expect(summary.expenses.slices.first?.category.isUnknown == true)
         #expect(outcome.report.isBalanced)
     }
 

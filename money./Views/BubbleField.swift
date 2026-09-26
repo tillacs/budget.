@@ -31,14 +31,10 @@ struct Bubble: Identifiable, Hashable {
         var result: [Bubble] = []
         for direction in Direction.allCases where only == nil || only == direction {
             for slice in summary.ring(direction).slices {
+                // Unbekannt ist die gestrichelte Blase: zählt mit, ist aber noch offen.
                 result.append(Bubble(
                     id: slice.category.id.uuidString, category: slice.category, direction: direction,
-                    total: slice.total, count: slice.count, isPending: false))
-            }
-            for slice in summary.pending[direction] ?? [] {
-                result.append(Bubble(
-                    id: "p-" + slice.category.id.uuidString, category: slice.category, direction: direction,
-                    total: slice.total, count: slice.count, isPending: true))
+                    total: slice.total, count: slice.count, isPending: slice.category.isUnknown))
             }
         }
         if summary.neutralCount > 0 {
@@ -244,9 +240,9 @@ private struct BubbleView: View {
                     .strokeBorder(Palette.hairline, lineWidth: 1)
             } else if bubble.isPending {
                 Circle()
-                    .fill(tint.opacity(0.10))
+                    .fill(Palette.raised.opacity(0.6))
                 Circle()
-                    .strokeBorder(tint.opacity(0.7), style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
+                    .strokeBorder(Palette.faint, style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
             } else {
                 Circle()
                     .fill(
@@ -258,7 +254,11 @@ private struct BubbleView: View {
             }
 
             VStack(spacing: 1) {
-                if bubble.isNeutral {
+                if bubble.isPending {
+                    Image(systemName: "questionmark")
+                        .font(.system(size: max(12, min(28, radius * 0.6)), weight: .semibold))
+                        .foregroundStyle(Palette.muted)
+                } else if bubble.isNeutral {
                     Image(systemName: "arrow.left.arrow.right")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(Palette.faint)
@@ -278,7 +278,7 @@ private struct BubbleView: View {
                     Text(showsAmount ? MoneyFormat.hero(bubble.total) : bubble.category.name)
                         .font(.system(size: max(9, min(13, radius * 0.24)), weight: .semibold))
                         .monospacedDigit()
-                        .foregroundStyle(bubble.isPending ? tint : .white)
+                        .foregroundStyle(bubble.isPending ? Palette.muted : .white)
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
                         .padding(.horizontal, 4)
@@ -293,7 +293,7 @@ private struct BubbleView: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(bubble.isNeutral
             ? "Neutral: \(bubble.count) Umbuchungen und Ausgleiche, \(MoneyFormat.amount(bubble.total))"
-            : "\(bubble.category.name), \(MoneyFormat.amount(bubble.total))\(bubble.isPending ? ", vorgeschlagen" : "")")
+            : "\(bubble.category.name), \(MoneyFormat.amount(bubble.total))\(bubble.isPending ? ", noch im Posteingang" : "")")
         .accessibilityAddTraits(.isButton)
     }
 }
