@@ -37,6 +37,17 @@ nonisolated enum Direction: String, Codable, Hashable, Sendable, CaseIterable {
 
     /// Verlässt das Geld das Konto? Ausgaben und Investitionen ja, Einnahmen nein.
     var isOutflow: Bool { self != .income }
+
+    /// Die Seiten, die zu einem Geldfluss passen: Was rausging, kann Ausgabe oder
+    /// Investition sein, was reinkam, nur Einnahme. Alles andere wird gar nicht
+    /// erst angeboten.
+    static func compatible(withInflow inflow: Bool) -> [Direction] {
+        inflow ? [.income] : [.expense, .invest]
+    }
+
+    static func compatible(with direction: Direction) -> [Direction] {
+        compatible(withInflow: !direction.isOutflow)
+    }
 }
 
 /// Damit eine Richtung selbst ein Blatt auslösen kann (`sheet(item:)`).
@@ -160,6 +171,11 @@ nonisolated struct Entry: Identifiable, Hashable, Codable, Sendable {
 
     /// Zählt die Buchung in Summen und Blasen?
     var counts: Bool { status != .proposed && kind != .transfer }
+
+    /// Kam das Geld rein? Bei Erstattungen ja, obwohl sie auf der Ausgabenseite stehen.
+    var isInflow: Bool { signedAmount > 0 }
+    /// Die Seiten, die für diese Buchung überhaupt in Frage kommen.
+    var compatibleDirections: [Direction] { Direction.compatible(withInflow: isInflow) }
 
     /// Der Name, unter dem die Buchung in Listen steht: Notiz, sonst Händler.
     var title: String {

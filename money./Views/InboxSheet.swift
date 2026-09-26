@@ -96,7 +96,10 @@ struct InboxSheet: View {
         }
         .tint(Palette.accent)
         .sheet(item: $pickerFor) { group in
-            CategoryPickerSheet(store: store, direction: group.lead.direction, current: group.lead.categoryID) {
+            CategoryPickerSheet(
+                store: store, direction: group.lead.direction, current: group.lead.categoryID,
+                allowed: group.lead.compatibleDirections
+            ) {
                 accepted += 1
                 store.correct(group.ids, to: $0)
             }
@@ -422,6 +425,8 @@ struct CategoryPickerSheet: View {
     let current: UUID?
     /// Eine Kategorie, die nicht zur Wahl steht — die, die gerade gelöscht wird.
     var exclude: UUID? = nil
+    /// Nur diese Seiten stehen zur Wahl: Was rausging, wird keine Einnahme.
+    var allowed: [Direction] = Direction.allCases
     var title: String = "Wohin?"
     let onPick: (UUID) -> Void
 
@@ -430,7 +435,7 @@ struct CategoryPickerSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                ForEach(Direction.allCases, id: \.self) { candidate in
+                ForEach(allowed, id: \.self) { candidate in
                     let categories = store.data.categories(for: candidate).filter { $0.id != exclude }
                     if !categories.isEmpty {
                         Section(candidate.plural) {

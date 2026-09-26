@@ -82,7 +82,10 @@ struct HomeScreen: View {
         .tint(Palette.accent)
         .sheet(item: $sheet, content: sheetContent)
         .sheet(item: $pickerFor) { entry in
-            CategoryPickerSheet(store: store, direction: entry.direction, current: entry.categoryID) {
+            CategoryPickerSheet(
+                store: store, direction: entry.direction, current: entry.categoryID,
+                allowed: entry.compatibleDirections
+            ) {
                 store.correct(entry.id, to: $0)
             }
         }

@@ -71,7 +71,10 @@ struct CategoryDetailSheet: View {
         .tint(Palette.accent)
         .presentationDetents([.large])
         .sheet(item: $pickerFor) { entry in
-            CategoryPickerSheet(store: store, direction: entry.direction, current: entry.categoryID) {
+            CategoryPickerSheet(
+                store: store, direction: entry.direction, current: entry.categoryID,
+                allowed: entry.compatibleDirections
+            ) {
                 store.correct(entry.id, to: $0)
             }
         }

@@ -54,20 +54,24 @@ struct AppStoreTests {
         #expect(store.entryCount(in: gehalt.id) == 1)
     }
 
-    /// Dreht eine Kategorie die Seite, müssen ihre Buchungen mitgehen — sonst lägen
-    /// Beträge in einem Ring, zu dem ihre Kategorie nicht mehr gehört.
+    /// Zwischen Ausgaben und Investiert ziehen die Buchungen mit. Zwischen rein und
+    /// raus geht es mit Buchungen nicht — eine Einnahme wird keine Ausgabe.
     @Test func seitenwechselZiehtDieBuchungenMit() throws {
         let store = store()
-        var sonstiges = try category(store, "Sonstiges")
-        store.add(Entry(amount: 50, direction: .income, categoryID: sonstiges.id))
+        var essen = try category(store, "Essen")
+        store.add(Entry(amount: 50, direction: .expense, categoryID: essen.id))
 
+        essen.direction = .invest
+        store.updateCategory(essen)
+        #expect(store.data.entries.allSatisfy { $0.direction == .invest })
+        #expect(store.summary(for: .current()).invested.total == 50)
+
+        var sonstiges = try category(store, "Sonstiges")
+        store.add(Entry(amount: 20, direction: .income, categoryID: sonstiges.id))
         sonstiges.direction = .expense
         store.updateCategory(sonstiges)
-
-        #expect(store.data.entries.allSatisfy { $0.direction == .expense })
-        let summary = store.summary(for: .current())
-        #expect(summary.income.total == 0)
-        #expect(summary.expenses.total == 50)
+        #expect(store.data.category(sonstiges.id)?.direction == .income)
+        #expect(store.summary(for: .current()).income.total == 20)
     }
 
     @Test func sortierenBetrifftNurDieEigeneSeite() throws {

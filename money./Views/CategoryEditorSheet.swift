@@ -28,6 +28,14 @@ struct CategoryEditorSheet: View {
         editing.map { store.entryCount(in: $0.id) } ?? 0
     }
 
+    /// Mit Buchungen darf eine Kategorie die Geldrichtung nicht mehr wechseln — eine
+    /// Ausgabe wird nicht zur Einnahme, nur weil ihre Kategorie umzieht. Zwischen
+    /// Ausgaben und Investiert geht es weiter.
+    private func isSideAllowed(_ candidate: Direction) -> Bool {
+        guard let editing, entryCount > 0 else { return true }
+        return Direction.compatible(with: editing.direction).contains(candidate)
+    }
+
     private var canSave: Bool {
         !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -86,6 +94,7 @@ struct CategoryEditorSheet: View {
             if let editing {
                 CategoryPickerSheet(
                     store: store, direction: editing.direction, current: nil, exclude: editing.id,
+                    allowed: Direction.compatible(with: editing.direction),
                     title: "\(entryCount) Buchungen umbuchen nach …"
                 ) { target in
                     store.deleteCategory(editing.id, movingEntriesTo: target)
@@ -196,10 +205,11 @@ struct CategoryEditorSheet: View {
             HStack(spacing: 4) {
                 ForEach(Direction.allCases, id: \.self) { candidate in
                     let isOn = currentDirection == candidate
-                    Button { currentDirection = candidate } label: {
+                    let allowed = isSideAllowed(candidate)
+                    Button { if allowed { currentDirection = candidate } } label: {
                         Text(candidate.plural)
                             .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(isOn ? Palette.canvas : Palette.muted)
+                            .foregroundStyle(isOn ? Palette.canvas : (allowed ? Palette.muted : Palette.faint.opacity(0.5)))
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 10)
                             .background { if isOn { Capsule().fill(Palette.ink) } }
@@ -212,7 +222,9 @@ struct CategoryEditorSheet: View {
             .background(Capsule().fill(Palette.raised))
 
             if editing != nil {
-                Text("Wechselt die Seite, ziehen die bisherigen Buchungen dieser Kategorie mit um.")
+                Text(entryCount > 0
+                     ? "Die Buchungen ziehen mit um. Zwischen rein und raus kann eine Kategorie mit Buchungen nicht wechseln."
+                     : "Wechselt die Seite, ziehen die bisherigen Buchungen dieser Kategorie mit um.")
                     .font(.caption)
                     .foregroundStyle(Palette.faint)
             }

@@ -435,6 +435,12 @@ final class AppStore {
         var updated = category
         updated.name = category.name.trimmingCharacters(in: .whitespacesAndNewlines)
         if updated.symbol.isEmpty { updated.symbol = "•" }
+        // Rein und raus sind keine Meinungssache: Mit Buchungen bleibt die Geldrichtung.
+        let before = data.categories[index]
+        if before.direction.isOutflow != updated.direction.isOutflow,
+           data.entries.contains(where: { $0.categoryID == updated.id }) {
+            updated.direction = before.direction
+        }
         data.categories[index] = updated
 
         // Wird die Richtung gedreht, ziehen die Buchungen mit. Alles andere würde die
