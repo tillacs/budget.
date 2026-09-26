@@ -38,6 +38,7 @@ final class AppStore {
                 let store = AppStore(data: stored, file: file)
                 // Was die App inzwischen dazugelernt hat, soll auch für alte Vorschläge gelten.
                 store.rerankProposals()
+                store.repairTransferDirections()
                 return store
             }
         } catch {
@@ -291,7 +292,11 @@ final class AppStore {
             first = false
             switch rejection {
             case .transfer:
+                // Das Vorzeichen folgt dem Geld, nicht der Seite: Ein Ausgleich steht
+                // auf der Ausgabenseite, obwohl das Geld reinkam.
+                let inflow = entry.isInflow
                 entry.kind = .transfer
+                entry.direction = inflow ? .income : .expense
                 entry.status = .confirmed
                 entry.categoryID = BudgetCategory.noneID
                 entry.refundOf = nil
@@ -535,6 +540,27 @@ final class AppStore {
     }
 
     // MARK: - Intern
+
+    /// Umbuchungen aus dem Export tragen ihr Vorzeichen im Buchungstyp. Wo eine
+    /// frühere Version das Vorzeichen beim Verschieben verloren hat, wird es hier
+    /// einmalig zurückgesetzt.
+    func repairTransferDirections() {
+        var changed = false
+        for i in data.entries.indices where data.entries[i].kind == .transfer {
+            guard let type = data.entries[i].importType else { continue }
+            let inflow: Bool
+            if type.contains("DIRECT_DEBIT") { inflow = false }
+            else if type.contains("INBOUND") { inflow = true }
+            else if type.contains("OUTBOUND") { inflow = false }
+            else { continue }
+            let wanted: Direction = inflow ? .income : .expense
+            if data.entries[i].direction != wanted {
+                data.entries[i].direction = wanted
+                changed = true
+            }
+        }
+        if changed { persist() }
+    }
 
     private func mark(_ entry: Entry) {
         lastSaved = entry

@@ -282,6 +282,36 @@ struct ImportPipelineTests {
         #expect(store.netAmount(of: dinner) == 0)
     }
 
+    /// Ein Ausgleich, der nach Neutral wandert, behält das echte Vorzeichen: Das
+    /// Geld kam rein, also steht es unter Neutral als Eingang.
+    @MainActor @Test func neutralBehältDasVorzeichenDesGeldes() throws {
+        let store = AppStore(data: .seeded(), file: DataFile(
+            fileURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("budget-vorzeichen-\(UUID().uuidString).json")))
+        let essen = try #require(store.data.categories.first { $0.name == "Essen" })
+        let gehalt = try #require(store.data.categories.first { $0.name == "Gehalt" })
+        let dinner = Entry(amount: 32, direction: .expense, categoryID: essen.id, note: "Pizza")
+        let back = Entry(amount: 16, direction: .income, categoryID: gehalt.id, note: "PayPal",
+                         source: .tradeRepublic, externalID: "pp", importType: "TRANSFER_INBOUND")
+        store.add(dinner)
+        store.add(back)
+        store.linkRefund(back.id, to: dinner.id)
+        #expect(store.entry(back.id)?.direction == .expense)   // Ausgleich: Ausgabenseite
+        #expect(store.entry(back.id)?.signedAmount == 16)       // aber Geld kam rein
+
+        store.reject(back.id, as: .transfer)
+        let neutral = try #require(store.entry(back.id))
+        #expect(neutral.kind == .transfer)
+        #expect(neutral.signedAmount == 16)
+
+        // Alte Daten mit verlorenem Vorzeichen werden beim Laden repariert.
+        var broken = neutral
+        broken.direction = .expense
+        store.update(broken)
+        store.repairTransferDirections()
+        #expect(store.entry(back.id)?.signedAmount == 16)
+    }
+
     @Test func eigeneIBANZähltAuchOhneNamen() throws {
         var data = AppData.seeded()
         data.ownIBANs = ["DE12100110012625980979"]
