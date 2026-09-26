@@ -13,7 +13,7 @@ import UniformTypeIdentifiers
 enum HomeSheet: Identifiable, Hashable {
     case quickEntry(Direction)
     case edit(Entry)
-    case inbox
+    case inbox(YearMonth?)
     case detail(UUID)
     case report
     case link(Entry)
@@ -24,7 +24,7 @@ enum HomeSheet: Identifiable, Hashable {
         switch self {
         case .quickEntry(let direction): return "neu-\(direction.rawValue)"
         case .edit(let entry): return "bearbeiten-\(entry.id)"
-        case .inbox: return "posteingang"
+        case .inbox(let m): return "posteingang-\(m.map { "\($0.year)-\($0.month)" } ?? "alle")"
         case .detail(let id): return "detail-\(id)"
         case .report: return "bericht"
         case .link(let entry): return "ausgleich-\(entry.id)"
@@ -185,7 +185,7 @@ struct HomeScreen: View {
                         onRecategorize: { pickerFor = $0 },
                         onLink: { sheet = .link($0) },
                         onHistory: { sheet = .history },
-                        onInbox: { sheet = .inbox },
+                        onInbox: { sheet = .inbox(m) },
                         onNeutral: { sheet = .neutral })
                 }
                 .padding(.horizontal, Metrics.screenInset)
@@ -230,7 +230,7 @@ struct HomeScreen: View {
     /// Der Posteingang, mit Zähler. Ohne Vorschläge bleibt er still und grau.
     private var inboxButton: some View {
         let count = store.proposals.count
-        return Button { sheet = .inbox } label: {
+        return Button { sheet = .inbox(nil) } label: {
             ZStack(alignment: .topTrailing) {
                 Image(systemName: count > 0 ? "tray.full" : "tray")
                     .font(.system(size: 14, weight: .semibold))
@@ -262,11 +262,11 @@ struct HomeScreen: View {
             summary: summary,
             direction: listDirection,
             onTap: { bubble in
-                if bubble.category.isUnknown { sheet = .inbox }
+                if bubble.category.isUnknown { sheet = .inbox(summary.month) }
                 else if bubble.category.isSurplus { sheet = .neutral }
                 else { sheet = .detail(bubble.category.id) }
             },
-            onPendingTap: { sheet = .inbox },
+            onPendingTap: { sheet = .inbox(summary.month) },
             onNeutralTap: { sheet = .neutral })
             .frame(height: 340)
             .overlay(alignment: .bottom) {
@@ -469,8 +469,8 @@ struct HomeScreen: View {
             QuickEntrySheet(store: store, direction: direction, editing: nil)
         case .edit(let entry):
             QuickEntrySheet(store: store, direction: entry.direction, editing: entry)
-        case .inbox:
-            InboxSheet(store: store)
+        case .inbox(let m):
+            InboxSheet(store: store, month: m)
         case .detail(let id):
             if let category = store.data.category(id) {
                 CategoryDetailSheet(store: store, category: category, month: month)
@@ -487,7 +487,7 @@ struct HomeScreen: View {
                     self.sheet = nil
                     Task {
                         try? await Task.sleep(for: .seconds(0.4))
-                        self.sheet = .inbox
+                        self.sheet = .inbox(nil)
                     }
                 }
             }

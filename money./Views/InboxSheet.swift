@@ -61,6 +61,15 @@ struct InboxGroup: Identifiable, Hashable {
 
 struct InboxSheet: View {
     let store: AppStore
+    /// Nur dieser Monat — von der Unbekannt-Blase aus. Nil heißt alles.
+    @State private var month: YearMonth?
+    private let openedMonth: YearMonth?
+
+    init(store: AppStore, month: YearMonth? = nil) {
+        self.store = store
+        self.openedMonth = month
+        _month = State(initialValue: month)
+    }
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -72,7 +81,10 @@ struct InboxSheet: View {
     @State private var expanded: Set<String> = []
     @State private var split: Set<String> = []
 
-    private var proposals: [Entry] { store.proposals }
+    private var proposals: [Entry] {
+        guard let month else { return store.proposals }
+        return store.proposals.filter { $0.month == month }
+    }
     private var groups: [InboxGroup] { InboxGroup.make(proposals, split: split) }
     private var confidentCount: Int {
         proposals.filter { ($0.suggestion?.band ?? .unsure) != .unsure }.count
@@ -85,9 +97,20 @@ struct InboxSheet: View {
                 .scrollContentBackground(.hidden)
                 .background(Palette.canvas)
                 .animation(motion, value: groups.map(\.id))
-                .navigationTitle(proposals.isEmpty ? "Posteingang" : "\(proposals.count) offen")
+                .navigationTitle(proposals.isEmpty ? "Posteingang"
+                                 : "\(proposals.count) offen" + (month.map { " · \(MoneyFormat.month($0))" } ?? ""))
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
+                    if let openedMonth {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button(month == nil ? "Nur \(MoneyFormat.month(openedMonth))" : "Alle Monate") {
+                                withAnimation(motion) { month = month == nil ? openedMonth : nil }
+                            }
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(Palette.muted)
+                        }
+                        .sharedBackgroundVisibility(.hidden)
+                    }
                     ToolbarItem(placement: .confirmationAction) {
                         Button("Fertig") { dismiss() }.fontWeight(.semibold).foregroundStyle(Palette.ink)
                     }
@@ -185,7 +208,12 @@ struct InboxSheet: View {
 
     private var acceptAllButton: some View {
         Button {
-            accepted += store.acceptAllConfident()
+            let ids = proposals.filter { entry in
+                let band = entry.suggestion?.band ?? .unsure
+                return entry.isPersonal ? band == .sure : band != .unsure
+            }.map(\.id)
+            store.accept(ids, announce: false)
+            accepted += ids.count
         } label: {
             Label("\(confidentCount) sichere annehmen", systemImage: "checkmark.circle.fill")
                 .font(.subheadline.weight(.semibold))

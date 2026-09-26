@@ -215,6 +215,13 @@ struct LedgerSection: View {
                         Label(entry.direction == .income ? "Als Ausgleich zuordnen …" : "Ausgleich zuordnen …",
                               systemImage: "arrow.uturn.backward")
                     }
+                    // Die Ausgleiche, die an dieser Ausgabe hängen, lassen sich hier lösen.
+                    ForEach(store.refunds(of: entry.id)) { refund in
+                        Button { store.unlinkRefund(refund.id) } label: {
+                            Label("Ausgleich entfernen: \(MoneyFormat.amount(refund.amount))\(refund.title.isEmpty ? "" : " · \(refund.title)")",
+                                  systemImage: "xmark.circle")
+                        }
+                    }
                 }
                 Button { store.reject(entry.id, as: .transfer) } label: {
                     Label("Nach Neutral verschieben", systemImage: "arrow.left.arrow.right")
