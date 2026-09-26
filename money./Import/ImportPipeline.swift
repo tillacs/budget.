@@ -110,6 +110,7 @@ nonisolated enum ImportPipeline {
                 counterpartyIBAN: row.counterpartyIBAN.isEmpty ? nil : row.counterpartyIBAN,
                 isin: row.symbol.isEmpty ? nil : row.symbol,
                 importType: shape.importType,
+                inflow: amount > 0,
                 kind: shape.kind,
                 status: .proposed)
 
@@ -139,6 +140,7 @@ nonisolated enum ImportPipeline {
                 adopted.counterpartyIBAN = draft.counterpartyIBAN
                 adopted.isin = draft.isin
                 adopted.importType = draft.importType
+                adopted.inflow = draft.inflow
                 adopted.date = draft.date
                 data.entries[i] = adopted
                 entryAmounts[adopted.month, default: 0] += adopted.signedAmount

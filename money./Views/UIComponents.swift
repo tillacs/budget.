@@ -100,6 +100,8 @@ struct CardStack<Content: View>: View {
             .background(
                 RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous)
                     .fill(Palette.card))
+            // Zeilenhintergründe und Aufgeklapptes bleiben innerhalb der Rundung.
+            .clipShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous)
                     .strokeBorder(Palette.hairline, lineWidth: 1))

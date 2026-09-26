@@ -210,7 +210,7 @@ struct CategoryDetailSheet: View {
                     }
                     .padding(.bottom, 6)
                     .background(tint.opacity(0.05))
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .transition(.opacity)
                 }
             }
         }

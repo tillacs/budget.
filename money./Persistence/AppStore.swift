@@ -186,6 +186,9 @@ final class AppStore {
         for id in ids {
             guard let index = data.entries.firstIndex(where: { $0.id == id }) else { continue }
             var entry = data.entries[index]
+            // Das echte Vorzeichen darf sich niemals ändern: Eine Kategorie der
+            // falschen Seite wird still ignoriert.
+            guard entry.compatibleDirections.contains(chosen.direction) else { continue }
             let proposed = entry.suggestion?.categoryID ?? entry.categoryID
             // Eine vorgeschlagene Erstattung, die doch eine Einnahme ist: Verknüpfung
             // lösen, ganz normal buchen.
@@ -216,7 +219,9 @@ final class AppStore {
     func linkRefund(_ inboundID: UUID, to originalID: UUID) {
         guard let i = data.entries.firstIndex(where: { $0.id == inboundID }),
               let original = data.entries.first(where: { $0.id == originalID }),
-              original.kind == .flow, original.direction != .income else { return }
+              original.kind == .flow, original.direction != .income,
+              // Nur Geld, das reinkam, kann eine Ausgabe ausgleichen.
+              data.entries[i].isInflow, !original.isInflow else { return }
         var entry = data.entries[i]
         entry.kind = .refund
         entry.direction = original.direction
@@ -541,23 +546,28 @@ final class AppStore {
 
     // MARK: - Intern
 
-    /// Umbuchungen aus dem Export tragen ihr Vorzeichen im Buchungstyp. Wo eine
-    /// frühere Version das Vorzeichen beim Verschieben verloren hat, wird es hier
-    /// einmalig zurückgesetzt.
+    /// Das echte Vorzeichen nachtragen, wo es noch fehlt, und Umbuchungen, deren
+    /// Seite eine frühere Version verdreht hat, zurücksetzen. Läuft einmal beim Start.
     func repairTransferDirections() {
         var changed = false
-        for i in data.entries.indices where data.entries[i].kind == .transfer {
-            guard let type = data.entries[i].importType else { continue }
-            let inflow: Bool
-            if type.contains("DIRECT_DEBIT") { inflow = false }
-            else if type.contains("INBOUND") { inflow = true }
-            else if type.contains("OUTBOUND") { inflow = false }
-            else { continue }
-            let wanted: Direction = inflow ? .income : .expense
-            if data.entries[i].direction != wanted {
-                data.entries[i].direction = wanted
-                changed = true
+        for i in data.entries.indices {
+            var entry = data.entries[i]
+            if entry.inflow == nil, entry.source == .tradeRepublic, let type = entry.importType {
+                let known: Bool?
+                if type.contains("DIRECT_DEBIT") { known = false }
+                else if type.contains("INBOUND") { known = true }
+                else if type.contains("OUTBOUND") { known = false }
+                else if ["INTEREST_PAYMENT", "DIVIDEND", "BENEFITS_SAVEBACK", "SELL"].contains(type) { known = true }
+                else if type.hasPrefix("BUY") { known = false }
+                else if type.hasPrefix("CARD") { known = entry.kind == .refund }
+                else { known = nil }
+                if let known { entry.inflow = known; changed = true }
             }
+            if entry.kind == .transfer, let inflow = entry.inflow {
+                let wanted: Direction = inflow ? .income : .expense
+                if entry.direction != wanted { entry.direction = wanted; changed = true }
+            }
+            data.entries[i] = entry
         }
         if changed { persist() }
     }

@@ -138,7 +138,8 @@ struct LedgerSection: View {
         .padding(.bottom, 6)
         .background(Palette.raised.opacity(0.5))
         .background(Palette.tint(slice.category.tint).opacity(0.05))
-        .transition(.opacity.combined(with: .move(edge: .top)))
+        // Nur ausblenden: Ein Schub nach oben würde über die Zeilen darüber fahren.
+        .transition(.opacity)
     }
 
     private func entryRow(_ entry: Entry, tint: Color) -> some View {
@@ -280,7 +281,7 @@ struct LedgerSection: View {
                 }
                 .padding(.bottom, 6)
                 .background(Palette.raised.opacity(0.5))
-                .transition(.opacity.combined(with: .move(edge: .top)))
+                .transition(.opacity)
             }
         }
         .opacity(0.85)

@@ -312,6 +312,38 @@ struct ImportPipelineTests {
         #expect(store.entry(back.id)?.signedAmount == 16)
     }
 
+    /// Das echte Vorzeichen kommt aus dem Export und ist unantastbar: keine
+    /// Kategorie der falschen Seite, kein Ausgleich mit ausgehendem Geld.
+    @MainActor @Test func dasEchteVorzeichenBleibt() throws {
+        let store = AppStore(data: .seeded(), file: DataFile(
+            fileURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("budget-fakt-\(UUID().uuidString).json")))
+        let csv = """
+        "datetime","date","account_type","category","type","asset_class","name","symbol","shares","price","amount","fee","tax","currency","original_amount","original_currency","fx_rate","description","transaction_id","counterparty_name","counterparty_iban","payment_reference","mcc_code"
+        "2026-09-04T12:05:45Z","2026-09-04","DEFAULT","CASH","CARD_TRANSACTION","","ALDI SUED","","","","-21.300000","","","EUR","","","","ALDI SUED","a1","","","","5411"
+        "2026-09-05T12:05:45Z","2026-09-05","DEFAULT","CASH","TRANSFER_INBOUND","","Max Muster","","","","40.000000","","","EUR","","","","Incoming transfer from Max Muster","t1","Max Muster","DE11","",""
+        """
+        try store.importTradeRepublic(csv)
+        let aldi = try #require(store.data.entries.first { $0.externalID == "a1" })
+        let max = try #require(store.data.entries.first { $0.externalID == "t1" })
+        #expect(aldi.inflow == false)
+        #expect(max.inflow == true)
+
+        let gehalt = try #require(store.data.categories.first { $0.name == "Gehalt" })
+        let essen = try #require(store.data.categories.first { $0.name == "Essen" })
+        store.correct(aldi.id, to: gehalt.id)          // falsche Seite: passiert nichts
+        #expect(store.entry(aldi.id)?.status == .proposed)
+        store.correct(max.id, to: essen.id)            // falsche Seite: passiert nichts
+        #expect(store.entry(max.id)?.direction == .income)
+        store.linkRefund(aldi.id, to: max.id)          // Ausgabe kann nichts ausgleichen
+        #expect(store.entry(aldi.id)?.kind == .flow)
+
+        store.reject(max.id, as: .transfer)
+        #expect(store.entry(max.id)?.signedAmount == 40)
+        store.reject(aldi.id, as: .transfer)
+        #expect(store.entry(aldi.id)?.signedAmount == Decimal(string: "-21.3"))
+    }
+
     @Test func eigeneIBANZähltAuchOhneNamen() throws {
         var data = AppData.seeded()
         data.ownIBANs = ["DE12100110012625980979"]

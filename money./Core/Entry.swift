@@ -108,6 +108,10 @@ nonisolated struct Entry: Identifiable, Hashable, Codable, Sendable {
     var isin: String?
     /// Der `type` aus dem Export, für Erklärungen und das Lernen je Typ.
     var importType: String?
+    /// Das echte Vorzeichen aus dem Export: Kam das Geld rein? Ein Fakt, keine
+    /// Meinung — er wird beim Einlesen gesetzt und danach nie verändert. Bei
+    /// Buchungen von Hand ergibt er sich aus der Richtung.
+    var inflow: Bool?
     var kind: EntryKind
     var status: EntryStatus
     /// Erstattung: die Buchung, die sie senkt.
@@ -133,6 +137,7 @@ nonisolated struct Entry: Identifiable, Hashable, Codable, Sendable {
         counterpartyIBAN: String? = nil,
         isin: String? = nil,
         importType: String? = nil,
+        inflow: Bool? = nil,
         kind: EntryKind = .flow,
         status: EntryStatus = .confirmed,
         refundOf: UUID? = nil,
@@ -153,6 +158,7 @@ nonisolated struct Entry: Identifiable, Hashable, Codable, Sendable {
         self.counterpartyIBAN = counterpartyIBAN
         self.isin = isin
         self.importType = importType
+        self.inflow = inflow
         self.kind = kind
         self.status = status
         self.refundOf = refundOf
@@ -172,8 +178,9 @@ nonisolated struct Entry: Identifiable, Hashable, Codable, Sendable {
     /// Zählt die Buchung in Summen und Blasen?
     var counts: Bool { status != .proposed && kind != .transfer }
 
-    /// Kam das Geld rein? Bei Erstattungen ja, obwohl sie auf der Ausgabenseite stehen.
-    var isInflow: Bool { signedAmount > 0 }
+    /// Kam das Geld rein? Das gespeicherte Vorzeichen zuerst; sonst aus Richtung
+    /// und Art (eine Erstattung steht auf der Ausgabenseite, obwohl Geld reinkam).
+    var isInflow: Bool { inflow ?? (signedAmount > 0) }
     /// Die Seiten, die für diese Buchung überhaupt in Frage kommen.
     var compatibleDirections: [Direction] { Direction.compatible(withInflow: isInflow) }
 
@@ -215,7 +222,7 @@ nonisolated struct Entry: Identifiable, Hashable, Codable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case id, date, amount, direction, categoryID, note, createdAt
-        case source, externalID, merchant, mcc, counterpartyIBAN, isin, importType
+        case source, externalID, merchant, mcc, counterpartyIBAN, isin, importType, inflow
         case kind, status, refundOf, pairedWith, suggestion
     }
 
@@ -237,6 +244,7 @@ nonisolated struct Entry: Identifiable, Hashable, Codable, Sendable {
         counterpartyIBAN = try c.decodeIfPresent(String.self, forKey: .counterpartyIBAN)
         isin = try c.decodeIfPresent(String.self, forKey: .isin)
         importType = try c.decodeIfPresent(String.self, forKey: .importType)
+        inflow = try c.decodeIfPresent(Bool.self, forKey: .inflow)
         kind = try c.decodeIfPresent(EntryKind.self, forKey: .kind) ?? .flow
         status = try c.decodeIfPresent(EntryStatus.self, forKey: .status) ?? .confirmed
         refundOf = try c.decodeIfPresent(UUID.self, forKey: .refundOf)
@@ -260,6 +268,7 @@ nonisolated struct Entry: Identifiable, Hashable, Codable, Sendable {
         try c.encodeIfPresent(counterpartyIBAN, forKey: .counterpartyIBAN)
         try c.encodeIfPresent(isin, forKey: .isin)
         try c.encodeIfPresent(importType, forKey: .importType)
+        try c.encodeIfPresent(inflow, forKey: .inflow)
         try c.encode(kind, forKey: .kind)
         try c.encode(status, forKey: .status)
         try c.encodeIfPresent(refundOf, forKey: .refundOf)
