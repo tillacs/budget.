@@ -1,12 +1,10 @@
 // HomeScreen.swift
 // budget. — die Seite, auf der alles steht
 //
-// Drei Seiten, seitlich blätterbar, Start in der Mitte:
-//   links  — die Ringe (genau)
-//   Mitte  — die Blasen (grob)
+// Zwei Seiten, seitlich blätterbar:
+//   links  — die Blasen: Monat, Saldo, die drei Summen, die Grafik, die Liste
 //   rechts — Kategorien, Konten & Import
-// Beide Übersichten zeigen oben den Monat, das Saldo und die drei Summen, darunter
-// die Grafik und die Liste. Der Posteingang sitzt oben links im Kopf, mit Zähler.
+// Der Posteingang sitzt oben links im Kopf, mit Zähler.
 // Erfasst wird über das Blatt, das der Kurzbefehl öffnet — oder über das Plus.
 
 import SwiftUI
@@ -37,7 +35,7 @@ enum HomeSheet: Identifiable, Hashable {
 struct HomeScreen: View {
     let store: AppStore
 
-    @State private var page = 1
+    @State private var page = 0
     @State private var month: YearMonth = .current()
     @State private var selection: RingSelection?
     @State private var listDirection: Direction = .expense
@@ -57,20 +55,13 @@ struct HomeScreen: View {
 
     private var summary: MonthSummary { store.summary(for: month) }
 
-    private var selectedSlice: Slice? {
-        guard let selection else { return nil }
-        return summary.ring(selection.direction).slices
-            .first { $0.category.id == selection.categoryID }
-    }
-
     var body: some View {
         ZStack {
             Palette.canvas.ignoresSafeArea()
 
             TabView(selection: $page) {
-                overview(rings).tag(0)
-                overview(bubbles).tag(1)
-                CategoriesPage(store: store) { withAnimation(motion) { page = 1 } }.tag(2)
+                overview.tag(0)
+                CategoriesPage(store: store) { withAnimation(motion) { page = 0 } }.tag(1)
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
 
@@ -113,7 +104,7 @@ struct HomeScreen: View {
             guard let latest = store.lastReport else { return }
             report = latest
             if let newest = latest.newestDate { month = newest.yearMonth }
-            page = 1
+            page = 0
             sheet = .report
         }
         .onChange(of: sheet) { _, new in
@@ -126,24 +117,18 @@ struct HomeScreen: View {
                 flight = pending
             }
         }
-        .onChange(of: selection) { _, new in
-            guard let new else { return }
-            listDirection = new.direction
-            expanded = new.categoryID
-        }
         .onChange(of: month) {
             selection = nil
             expanded = nil
         }
-        .sensoryFeedback(.selection, trigger: selection) { _, new in new != nil }
         .sensoryFeedback(.success, trigger: store.saveTick)
         .sensoryFeedback(.selection, trigger: page)
     }
 
     // MARK: - Übersicht
 
-    /// Eine Übersichtsseite: Kopf, Monat und Summen, die Grafik, die Liste.
-    private func overview<Visual: View>(_ visual: Visual) -> some View {
+    /// Die Übersicht: Kopf, Monat und Summen, die Blasen, die Liste.
+    private var overview: some View {
         ZStack(alignment: .bottomTrailing) {
             ScrollView {
                 VStack(spacing: 0) {
@@ -153,7 +138,7 @@ struct HomeScreen: View {
                         .padding(.bottom, 12)
                     totals
                         .padding(.bottom, 14)
-                    visual
+                    bubbles
                         .padding(.bottom, 18)
                     LedgerSection(
                         store: store,
@@ -196,7 +181,7 @@ struct HomeScreen: View {
                 inboxButton
                 Spacer()
                 Button {
-                    withAnimation(motion) { page = 2 }
+                    withAnimation(motion) { page = 1 }
                 } label: {
                     CategoriesGlyph(categories: store.data.categories(for: .expense))
                 }
@@ -254,13 +239,6 @@ struct HomeScreen: View {
             }
     }
 
-    private var rings: some View {
-        FlowRings(summary: summary, selection: $selection) { ringCenter }
-            .frame(maxWidth: 300)
-            .frame(maxWidth: .infinity)
-            .padding(.top, 4)
-    }
-
     /// Monat und Ergebnis über der Grafik: Der Monat ist die Überschrift der
     /// Seite, das Saldo die Zahl darunter.
     private var figureBlock: some View {
@@ -287,53 +265,6 @@ struct HomeScreen: View {
         }
         .frame(maxWidth: .infinity)
         .animation(motion, value: month)
-    }
-
-    @ViewBuilder
-    private var ringCenter: some View {
-        VStack(spacing: 2) {
-            if let slice = selectedSlice {
-                Text(slice.category.symbol)
-                    .font(.system(size: 20))
-                    .padding(.top, 2)
-                Text(MoneyFormat.hero(slice.total))
-                    .font(.system(size: 34, weight: .semibold))
-                    .monospacedDigit()
-                    .tracking(-1)
-                    .foregroundStyle(Palette.tint(slice.category.tint))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.5)
-                Text("\(slice.category.name) · \(MoneyFormat.share(slice.share))")
-                    .font(.caption)
-                    .foregroundStyle(Palette.faint)
-                    .lineLimit(1)
-            } else if summary.isEmpty {
-                Text("Noch nichts")
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(Palette.ink)
-                    .padding(.top, 6)
-            } else {
-                let figure = centerFigure
-                Text(figure.text)
-                    .font(.system(size: 40, weight: .semibold))
-                    .monospacedDigit()
-                    .tracking(-1.6)
-                    .contentTransition(.numericText())
-                    .foregroundStyle(figure.tone)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.45)
-                    .padding(.top, 4)
-                Text(figure.caption)
-                    .font(.system(size: 10, weight: .semibold))
-                    .textCase(.uppercase)
-                    .kerning(1.4)
-                    .foregroundStyle(Palette.faint)
-                    .padding(.top, 2)
-            }
-        }
-        .padding(.horizontal, 8)
-        .animation(motion, value: selection)
-        .accessibilityElement(children: .contain)
     }
 
     /// Einen Monat vor oder zurück. Der Pager nimmt sich die Wischgeste, also

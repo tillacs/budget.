@@ -24,12 +24,12 @@ Die App kann drei Dinge, und das ist der Entwurf, nicht ein Zwischenstand:
    (`rerankProposals`). Eine Entscheidung über eine Händler-Gruppe zählt für Wörter
    und MCC nur einmal (`learnable`).
 3. **Zwei Seiten, seitlich blätterbar** (`HomeScreen` als Pager):
-   - Übersicht: Blasen (`BubbleField`, eine je Kategorie, Fläche nach Summe,
-     Vorschläge gestrichelt, Drücken zeigt Zahlen) oder Ringe (`FlowRings`, drei
-     Ringe: Ausgaben, Einnahmen, Investiert). Darunter die Summen, die Liste
-     (`LedgerSection`) und die Umbuchungen. Tipp auf eine Blase öffnet
-     `CategoryDetailSheet`. Der Posteingang (`InboxSheet`) hängt als Pille oben,
-     solange etwas wartet.
+   - Übersicht: Monat, Saldo, die drei Summen, dann die Blasen (`BubbleField`, eine
+     je Kategorie, Fläche nach Summe, Vorschläge gestrichelt, Neutral klein und
+     grau, Drücken zeigt Zahlen), darunter die Liste (`LedgerSection`) und die
+     neutrale Zeile. Tipp auf eine Blase öffnet `CategoryDetailSheet`, die graue
+     `NeutralSheet`. Der Posteingang (`InboxSheet`) sitzt oben links mit Zähler.
+     Die Ringe gab es bis 26.09.2026; sie sind bewusst entfernt.
    - `CategoriesPage`: Kategorien in drei Bereichen, Konten & Import, Kontoinhaber
      und eigene IBANs, Automatik-Schwelle, die Kurzbefehle.
 

@@ -10,7 +10,20 @@ import SwiftUI
 struct CategoryDetailSheet: View {
     let store: AppStore
     let category: BudgetCategory
-    let month: YearMonth
+    let initialMonth: YearMonth
+
+    init(store: AppStore, category: BudgetCategory, month: YearMonth) {
+        self.store = store
+        self.category = category
+        self.initialMonth = month
+        _month = State(initialValue: month)
+        _anchor = State(initialValue: month)
+    }
+
+    /// Der Monat, den die Ansicht zeigt — per Tipp auf einen Balken wechselbar.
+    @State private var month: YearMonth
+    /// Der rechte Rand des Balkenfensters; die Pfeile verschieben es.
+    @State private var anchor: YearMonth
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -110,36 +123,51 @@ struct CategoryDetailSheet: View {
         }
     }
 
-    /// Sechs Monate als Balken. Nur der höchste Wert steht dran.
+    /// Sechs Monate als Balken, jeder antippbar: Die Ansicht springt in diesen
+    /// Monat. Der Wert steht am höchsten und am gewählten Balken.
     private var history: some View {
-        let months = (0..<6).reversed().map { month.advanced(by: -$0) }
+        let months = (0..<6).reversed().map { anchor.advanced(by: -$0) }
         let values = months.map { m -> Decimal in
             store.summary(for: m).ring(category.direction).slices
                 .first { $0.category.id == category.id }?.total ?? 0
         }
         let peak = values.max() ?? 0
+        let canGoForward = anchor < YearMonth.current()
         return VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .bottom, spacing: 10) {
+            HStack(alignment: .bottom, spacing: 8) {
+                windowStep(-6, "chevron.left", enabled: true)
                 ForEach(Array(zip(months, values)), id: \.0) { m, value in
-                    VStack(spacing: 5) {
-                        if value == peak, peak > 0 {
-                            Text(MoneyFormat.hero(value))
-                                .font(.system(size: 10, weight: .semibold))
-                                .monospacedDigit()
-                                .foregroundStyle(Palette.muted)
+                    Button {
+                        withAnimation(motion) { month = m }
+                    } label: {
+                        VStack(spacing: 5) {
+                            if (value == peak && peak > 0) || m == month {
+                                Text(MoneyFormat.hero(value))
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .monospacedDigit()
+                                    .foregroundStyle(m == month ? Palette.ink : Palette.muted)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.7)
+                            }
+                            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                .fill(m == month ? tint : tint.opacity(0.3))
+                                .frame(height: peak > 0 ? max(4, 70 * (value / peak).doubleValue) : 4)
+                            Text(shortMonth(m))
+                                .font(.system(size: 10, weight: m == month ? .semibold : .regular))
+                                .foregroundStyle(m == month ? Palette.ink : Palette.faint)
                         }
-                        RoundedRectangle(cornerRadius: 5, style: .continuous)
-                            .fill(m == month ? tint : tint.opacity(0.3))
-                            .frame(height: peak > 0 ? max(4, 70 * (value / peak).doubleValue) : 4)
-                        Text(shortMonth(m))
-                            .font(.system(size: 10))
-                            .foregroundStyle(m == month ? Palette.ink : Palette.faint)
+                        .frame(maxWidth: .infinity)
+                        .contentShape(Rectangle())
                     }
-                    .frame(maxWidth: .infinity)
+                    .buttonStyle(PressableRowStyle())
+                    .accessibilityLabel("\(MoneyFormat.month(m)): \(MoneyFormat.amount(value))")
+                    .accessibilityAddTraits(m == month ? [.isSelected] : [])
                 }
+                windowStep(6, "chevron.right", enabled: canGoForward)
             }
             .frame(height: 110, alignment: .bottom)
         }
+        .sensoryFeedback(.selection, trigger: month)
         .padding(Metrics.cardPadding)
         .background(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous).fill(Palette.card))
         .overlay(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous).strokeBorder(Palette.hairline, lineWidth: 1))
@@ -252,6 +280,24 @@ struct CategoryDetailSheet: View {
         .padding(.leading, Metrics.cardPadding + 4)
         .padding(.trailing, Metrics.cardPadding - 6)
         .padding(.vertical, 6)
+    }
+
+    /// Das Fenster um ein halbes Jahr verschieben — nicht in die Zukunft.
+    private func windowStep(_ step: Int, _ symbol: String, enabled: Bool) -> some View {
+        Button {
+            withAnimation(motion) {
+                anchor = min(anchor.advanced(by: step), YearMonth.current())
+            }
+        } label: {
+            Image(systemName: symbol)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(enabled ? Palette.faint : Palette.faint.opacity(0.3))
+                .frame(width: 18, height: 60)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .accessibilityLabel(step < 0 ? "Frühere Monate" : "Spätere Monate")
     }
 
     private func shortMonth(_ m: YearMonth) -> String {

@@ -7,6 +7,12 @@
 
 import SwiftUI
 
+/// Die markierte Kategorie in der Liste.
+struct RingSelection: Hashable {
+    var direction: Direction
+    var categoryID: UUID
+}
+
 struct LedgerSection: View {
     let store: AppStore
     let ring: RingSummary

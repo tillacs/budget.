@@ -181,6 +181,8 @@ nonisolated struct Entry: Identifiable, Hashable, Codable, Sendable {
     var title: String {
         if !note.isEmpty { return note }
         if let merchant { return MerchantKey.displayName(merchant) }
+        // Zinsen, Dividenden, Saveback: kein Händler, aber eine Art.
+        if let prior = SuggestionEngine.typePrior(importType) { return prior.label }
         return ""
     }
 
