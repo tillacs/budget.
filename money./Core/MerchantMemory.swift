@@ -32,6 +32,9 @@ nonisolated struct Signals: Hashable, Sendable {
     var iban: String?
     var isin: String?
     var importType: String?
+    /// Nur bei Menschen: Name und Betrag zusammen — „Mutter, 200 €". Der Name allein
+    /// darf nichts entscheiden, der immer gleiche Betrag derselben Person schon.
+    var personAmount: String?
 }
 
 nonisolated struct MerchantMemory: Codable, Hashable, Sendable {
@@ -42,6 +45,7 @@ nonisolated struct MerchantMemory: Codable, Hashable, Sendable {
     var byIBAN: [String: [String: Tally]]
     var byISIN: [String: [String: Tally]]
     var byType: [String: [String: Tally]]
+    var byPersonAmount: [String: [String: Tally]]
 
     init(
         byMerchant: [String: [String: Tally]] = [:],
@@ -49,7 +53,8 @@ nonisolated struct MerchantMemory: Codable, Hashable, Sendable {
         byMCC: [String: [String: Tally]] = [:],
         byIBAN: [String: [String: Tally]] = [:],
         byISIN: [String: [String: Tally]] = [:],
-        byType: [String: [String: Tally]] = [:]
+        byType: [String: [String: Tally]] = [:],
+        byPersonAmount: [String: [String: Tally]] = [:]
     ) {
         self.byMerchant = byMerchant
         self.byToken = byToken
@@ -57,6 +62,7 @@ nonisolated struct MerchantMemory: Codable, Hashable, Sendable {
         self.byIBAN = byIBAN
         self.byISIN = byISIN
         self.byType = byType
+        self.byPersonAmount = byPersonAmount
     }
 
     init(from decoder: any Decoder) throws {
@@ -67,11 +73,12 @@ nonisolated struct MerchantMemory: Codable, Hashable, Sendable {
         byIBAN = try c.decodeIfPresent([String: [String: Tally]].self, forKey: .byIBAN) ?? [:]
         byISIN = try c.decodeIfPresent([String: [String: Tally]].self, forKey: .byISIN) ?? [:]
         byType = try c.decodeIfPresent([String: [String: Tally]].self, forKey: .byType) ?? [:]
+        byPersonAmount = try c.decodeIfPresent([String: [String: Tally]].self, forKey: .byPersonAmount) ?? [:]
     }
 
     var isEmpty: Bool {
         byMerchant.isEmpty && byToken.isEmpty && byMCC.isEmpty
-            && byIBAN.isEmpty && byISIN.isEmpty && byType.isEmpty
+            && byIBAN.isEmpty && byISIN.isEmpty && byType.isEmpty && byPersonAmount.isEmpty
     }
 
     // MARK: - Lernen
@@ -105,7 +112,7 @@ nonisolated struct MerchantMemory: Codable, Hashable, Sendable {
             }
         }
         purge(&byMerchant); purge(&byToken); purge(&byMCC)
-        purge(&byIBAN); purge(&byISIN); purge(&byType)
+        purge(&byIBAN); purge(&byISIN); purge(&byType); purge(&byPersonAmount)
     }
 
     private mutating func apply(
@@ -128,6 +135,7 @@ nonisolated struct MerchantMemory: Codable, Hashable, Sendable {
         bump(&byIBAN, signals.iban)
         bump(&byISIN, signals.isin)
         bump(&byType, signals.importType)
+        bump(&byPersonAmount, signals.personAmount)
     }
 
     // MARK: - Nachschlagen
@@ -148,6 +156,16 @@ nonisolated struct MerchantMemory: Codable, Hashable, Sendable {
     func topCategory(forMerchant merchant: String, now: Date = Date()) -> UUID? {
         guard let key = MerchantKey.normalized(merchant) else { return nil }
         return Self.weights(byMerchant[key], now: now).max { $0.value < $1.value }?.key
+    }
+
+    /// Person und Betrag: die Kategorie mit den meisten Bestätigungen und deren Zahl.
+    func personAmountRule(_ key: String?, now: Date = Date()) -> (category: UUID, count: Int)? {
+        guard let key else { return nil }
+        let weights = Self.weights(byPersonAmount[key], now: now).sorted { $0.value > $1.value }
+        guard let best = weights.first else { return nil }
+        let runnerUp = weights.count > 1 ? weights[1].value : 0
+        let net = Int((best.value - runnerUp).rounded())
+        return net >= 1 ? (best.key, net) : nil
     }
 
     /// Wie oft ein Händler netto auf diese Kategorie bestätigt wurde.

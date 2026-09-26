@@ -347,7 +347,11 @@ final class AppStore {
     func acceptAllConfident() -> Int {
         // Menschen bleiben draußen: Ihre Zwecke sind zu verschieden für einen Sammelklick.
         let ids = data.proposals
-            .filter { ($0.suggestion?.band ?? .unsure) != .unsure && !$0.isPersonal }
+            .filter { entry in
+                let band = entry.suggestion?.band ?? .unsure
+                // Menschen nur, wenn Person und Betrag zweimal bestätigt sind.
+                return entry.isPersonal ? band == .sure : band != .unsure
+            }
             .map(\.id)
         accept(ids, announce: false)
         return ids.count
@@ -375,6 +379,7 @@ final class AppStore {
             if draft.kind == .flow, draft.direction == .income,
                draft.importType?.hasPrefix("TRANSFER") == true,
                draft.suggestion?.decision != .rejected,
+               data.memory.personAmountRule(draft.signals.personAmount) == nil,
                let original = ImportPipeline.reimbursementTarget(for: draft, in: data) {
                 data.entries[i].kind = .refund
                 data.entries[i].direction = .expense

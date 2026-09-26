@@ -600,32 +600,54 @@ struct SuggestionEngineTests {
         #expect(card.suggestion.isGuess == false)
     }
 
-    /// Menschen sind keine Regel: Vorschlag ja, mit Verteilung, aber nie Automatik
-    /// und nie „sicher". Firmen dagegen schon.
-    @Test func menschenBekommenSchwacheVorschlägeOhneAutomatik() throws {
+    /// Menschen: Der Name allein entscheidet nichts. Dieselbe Person mit demselben
+    /// Betrag zweimal bestätigt ist sicher, dreimal bucht die Maschine selbst.
+    @Test func menschenLernenNurÜberPersonUndBetrag() throws {
         var data = AppData.seeded()
         let gehalt = try #require(data.categories.first { $0.name == "Gehalt" })
         let sonstiges = try #require(data.categories.first { $0.name == "Sonstiges" })
-        let vater = Entry(date: CalendarDate(year: 2026, month: 9, day: 3), amount: 100,
-                          direction: .income, categoryID: BudgetCategory.noneID, source: .tradeRepublic,
-                          merchant: "Max Muster", counterpartyIBAN: "DE11", importType: "TRANSFER_INBOUND")
-        #expect(vater.isPersonal)
-        #expect(vater.signals.tokens.isEmpty)
-        for _ in 0..<5 { data.memory.confirm(vater.signals, as: gehalt.id) }
-        data.memory.confirm(vater.signals, as: sonstiges.id)
+        func transfer(_ amount: Decimal) -> Entry {
+            Entry(date: CalendarDate(year: 2026, month: 9, day: 3), amount: amount,
+                  direction: .income, categoryID: BudgetCategory.noneID, source: .tradeRepublic,
+                  merchant: "Mutter Muster", counterpartyIBAN: "DE11", importType: "TRANSFER_INBOUND", inflow: true)
+        }
+        func rank(_ e: Entry) -> Ranking? {
+            SuggestionEngine.rank(e, categories: data.categories, memory: data.memory, lastUsed: nil, history: HistoryIndex())
+        }
+        #expect(transfer(200).isPersonal)
+        #expect(transfer(200).signals.tokens.isEmpty)
+        #expect(transfer(200).signals.personAmount?.hasSuffix("|200") == true)
 
-        let ranking = try #require(SuggestionEngine.rank(
-            vater, categories: data.categories, memory: data.memory, lastUsed: nil, history: HistoryIndex()))
-        #expect(ranking.suggestion.categoryID == gehalt.id)
-        #expect(ranking.autoEligible == false)
-        #expect(ranking.suggestion.band != .sure)
-        #expect(ranking.suggestion.reason.contains("5× Gehalt"))
-        #expect(ranking.suggestion.reason.contains("1× Sonstiges"))
-        #expect(ranking.suggestion.alternatives.first == sonstiges.id)
+        // Einmal 200 € als Gehalt: wahrscheinlich, nicht sicher.
+        data.memory.confirm(transfer(200).signals, as: gehalt.id)
+        var r = try #require(rank(transfer(200)))
+        #expect(r.suggestion.categoryID == gehalt.id)
+        #expect(r.suggestion.band == .likely)
+        #expect(r.autoEligible == false)
 
+        // Zweimal: sicher, aber noch nicht automatisch.
+        data.memory.confirm(transfer(200).signals, as: gehalt.id)
+        r = try #require(rank(transfer(200)))
+        #expect(r.suggestion.band == .sure)
+        #expect(r.autoEligible == false)
+        #expect(r.suggestion.reason.contains("2×"))
+
+        // Dreimal: die Maschine darf buchen.
+        data.memory.confirm(transfer(200).signals, as: gehalt.id)
+        r = try #require(rank(transfer(200)))
+        #expect(r.autoEligible)
+
+        // Dieselbe Person mit anderem Betrag: nur ein Hinweis, unsicher, nie automatisch.
+        data.memory.confirm(transfer(35).signals, as: sonstiges.id)
+        let other = try #require(rank(transfer(80)))
+        #expect(other.suggestion.band == .unsure)
+        #expect(other.autoEligible == false)
+        #expect(other.suggestion.reason.contains("bisher"))
+
+        // Eine Firma lernt wie ein Händler.
         let firma = Entry(date: CalendarDate(year: 2026, month: 9, day: 1), amount: 2400,
                           direction: .income, categoryID: BudgetCategory.noneID, source: .tradeRepublic,
-                          merchant: "Beispiel GmbH", importType: "TRANSFER_INBOUND")
+                          merchant: "Beispiel GmbH", importType: "TRANSFER_INBOUND", inflow: true)
         #expect(firma.isPersonal == false)
         var memory = MerchantMemory()
         memory.confirm(firma.signals, as: gehalt.id)

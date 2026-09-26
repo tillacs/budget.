@@ -91,6 +91,25 @@ nonisolated enum SuggestionEngine {
         // das Häufigste, mit der ganzen Verteilung als Begründung, gedeckelt unter
         // „sicher" — und die Automatik bleibt aus, egal wie oft bestätigt wurde.
         if draft.isPersonal {
+            // Die eine Regel, die bei Menschen gilt: dieselbe Person, derselbe Betrag.
+            // Zweimal bestätigt heißt sicher, dreimal heißt: buchen.
+            if let rule = memory.personAmountRule(signals.personAmount, now: now), allowed.contains(rule.category) {
+                let who = MerchantKey.displayName(draft.merchant ?? "diese Person")
+                var alternatives = candidates.sorted { $0.sortIndex < $1.sortIndex }
+                    .filter { $0.id != rule.category }.prefix(2).map(\.id)
+                if alternatives.count < 2, let extra = candidates.first(where: { $0.id != rule.category && !alternatives.contains($0.id) }) {
+                    alternatives.append(extra.id)
+                }
+                return Ranking(
+                    suggestion: Suggestion(
+                        categoryID: rule.category,
+                        confidence: rule.count >= 2 ? 0.92 : 0.7,
+                        alternatives: alternatives,
+                        evidence: [Evidence(kind: .recurring,
+                                            text: "\(who), \(MoneyFormat.amount(draft.amount)): \(rule.count)× als \(name(rule.category)) bestätigt",
+                                            strength: rule.count >= 2 ? 0.92 : 0.7)]),
+                    autoEligible: rule.count >= 3)
+            }
             var weights: [UUID: Double] = [:]
             if let key = signals.merchantKey {
                 for (id, w) in MerchantMemory.weights(memory.byMerchant[key], now: now) { weights[id, default: 0] += w }
@@ -120,12 +139,14 @@ nonisolated enum SuggestionEngine {
             where alternatives.count < 2 && category.id != top.key && !alternatives.contains(category.id) {
                 alternatives.append(category.id)
             }
+            // Ohne passenden Betrag bleibt der Name ein Hinweis unter „wahrscheinlich":
+            // vorgewählt, aber nie im Sammelklick und nie automatisch.
             return Ranking(
                 suggestion: Suggestion(
                     categoryID: top.key,
-                    confidence: min(0.75, 0.35 + 0.4 * share),
+                    confidence: min(0.59, 0.3 + 0.3 * share),
                     alternatives: alternatives,
-                    evidence: [Evidence(kind: .merchant, text: "\(who) bisher \(distribution)", strength: 0.6)]),
+                    evidence: [Evidence(kind: .merchant, text: "\(who) bisher \(distribution)", strength: 0.5)]),
                 autoEligible: false)
         }
 

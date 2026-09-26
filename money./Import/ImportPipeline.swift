@@ -189,6 +189,7 @@ nonisolated enum ImportPipeline {
             // vermutlich deren Ausgleich — „du hast bezahlt, er schickt es zurück".
             // Nur ein Vorschlag: gleicher Betrag ist ein Hinweis, kein Beweis.
             if shape.kind == .flow, draft.direction == .income, shape.isPersonal,
+               data.memory.personAmountRule(draft.signals.personAmount) == nil,
                let original = reimbursementTarget(for: draft, in: data) {
                 draft.kind = .refund
                 draft.direction = .expense

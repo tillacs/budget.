@@ -215,7 +215,8 @@ nonisolated struct Entry: Identifiable, Hashable, Codable, Sendable {
             isin: isin,
             // Nur Typen mit eigener Bedeutung (Zinsen, Sparplan …) taugen zum Lernen —
             // „Kartenzahlung" sagt nichts darüber, wofür das Geld war.
-            importType: SuggestionEngine.typePrior(importType) != nil ? importType : nil)
+            importType: SuggestionEngine.typePrior(importType) != nil ? importType : nil,
+            personAmount: personal ? merchant.flatMap(MerchantKey.normalized).map { "\($0)|\(amount)" } : nil)
     }
 
     // MARK: - Codable, von Hand
