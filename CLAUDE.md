@@ -23,7 +23,9 @@ Die App kann drei Dinge, und das ist der Entwurf, nicht ein Zwischenstand:
    correct / reject`) lernt und bewertet die offenen Vorschläge sofort neu
    (`rerankProposals`). Eine Entscheidung über eine Händler-Gruppe zählt für Wörter
    und MCC nur einmal (`learnable`).
-3. **Zwei Seiten, seitlich blätterbar** (`HomeScreen` als Pager):
+3. **Ein Pager über die Monate** (`HomeScreen`, `HomePage`): Jeder Monat ist eine
+   Seite, Wischen blättert durch die Monate; erst hinter dem laufenden Monat liegt
+   rechts die Kategorienseite. Pfeile und Monatsmenü setzen dieselbe Seite.
    - Übersicht: Monat, Saldo, die drei Summen, dann die Blasen (`BubbleField`, eine
      je Kategorie, Fläche nach Summe, Vorschläge gestrichelt, Neutral klein und
      grau, Drücken zeigt Zahlen), darunter die Liste (`LedgerSection`) und die

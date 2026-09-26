@@ -1,9 +1,9 @@
 // HomeScreen.swift
 // budget. — die Seite, auf der alles steht
 //
-// Zwei Seiten, seitlich blätterbar:
-//   links  — die Blasen: Monat, Saldo, die drei Summen, die Grafik, die Liste
-//   rechts — Kategorien, Konten & Import
+// Ein Pager über die Monate: Jeder Monat ist eine Seite — Monat, Saldo, die drei
+// Summen, die Blasen, die Liste. Wischen blättert durch die Monate; erst hinter dem
+// laufenden Monat liegt rechts die Seite mit Kategorien, Konten & Import.
 // Der Posteingang sitzt oben links im Kopf, mit Zähler.
 // Erfasst wird über das Blatt, das der Kurzbefehl öffnet — oder über das Plus.
 
@@ -32,10 +32,16 @@ enum HomeSheet: Identifiable, Hashable {
     }
 }
 
+/// Eine Seite im Pager: ein Monat oder, ganz rechts, die Kategorien.
+enum HomePage: Hashable {
+    case month(YearMonth)
+    case categories
+}
+
 struct HomeScreen: View {
     let store: AppStore
 
-    @State private var page = 0
+    @State private var page: HomePage = .month(.current())
     @State private var month: YearMonth = .current()
     @State private var selection: RingSelection?
     @State private var listDirection: Direction = .expense
@@ -53,15 +59,31 @@ struct HomeScreen: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var summary: MonthSummary { store.summary(for: month) }
+    /// Alle Monate vom frühesten mit Buchungen (mindestens ein Jahr zurück) bis heute.
+    private var pageMonths: [YearMonth] {
+        let current = YearMonth.current()
+        let earliest = min(
+            store.recordedMonths(including: month).min() ?? current,
+            current.advanced(by: -11))
+        var months: [YearMonth] = []
+        var cursor = earliest
+        while cursor <= current {
+            months.append(cursor)
+            cursor = cursor.advanced(by: 1)
+        }
+        return months
+    }
 
     var body: some View {
         ZStack {
             Palette.canvas.ignoresSafeArea()
 
             TabView(selection: $page) {
-                overview.tag(0)
-                CategoriesPage(store: store) { withAnimation(motion) { page = 0 } }.tag(1)
+                ForEach(pageMonths, id: \.self) { m in
+                    overview(for: m).tag(HomePage.month(m))
+                }
+                CategoriesPage(store: store) { withAnimation(motion) { page = .month(month) } }
+                    .tag(HomePage.categories)
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
 
@@ -104,7 +126,6 @@ struct HomeScreen: View {
             guard let latest = store.lastReport else { return }
             report = latest
             if let newest = latest.newestDate { month = newest.yearMonth }
-            page = 0
             sheet = .report
         }
         .onChange(of: sheet) { _, new in
@@ -117,9 +138,15 @@ struct HomeScreen: View {
                 flight = pending
             }
         }
-        .onChange(of: month) {
+        // Seite und Monat laufen gemeinsam: Wischen setzt den Monat, Pfeile und
+        // Menü setzen die Seite.
+        .onChange(of: page) { _, new in
+            if case .month(let m) = new, m != month { month = m }
+        }
+        .onChange(of: month) { _, new in
             selection = nil
             expanded = nil
+            if page != .month(new) { withAnimation(motion) { page = .month(new) } }
         }
         .sensoryFeedback(.success, trigger: store.saveTick)
         .sensoryFeedback(.selection, trigger: page)
@@ -127,23 +154,24 @@ struct HomeScreen: View {
 
     // MARK: - Übersicht
 
-    /// Die Übersicht: Kopf, Monat und Summen, die Blasen, die Liste.
-    private var overview: some View {
-        ZStack(alignment: .bottomTrailing) {
+    /// Die Übersicht eines Monats: Kopf, Monat und Summen, die Blasen, die Liste.
+    private func overview(for m: YearMonth) -> some View {
+        let summary = store.summary(for: m)
+        return ZStack(alignment: .bottomTrailing) {
             ScrollView {
                 VStack(spacing: 0) {
                     header
                         .padding(.bottom, 14)
-                    figureBlock
+                    figureBlock(m, summary)
                         .padding(.bottom, 12)
-                    totals
+                    totals(summary)
                         .padding(.bottom, 14)
-                    bubbles
+                    bubbles(summary)
                         .padding(.bottom, 18)
                     LedgerSection(
                         store: store,
                         ring: summary.ring(listDirection),
-                        month: month,
+                        month: m,
                         neutralTotal: summary.neutralTotal,
                         neutralCount: summary.neutralCount,
                         selection: $selection,
@@ -181,7 +209,7 @@ struct HomeScreen: View {
                 inboxButton
                 Spacer()
                 Button {
-                    withAnimation(motion) { page = 1 }
+                    withAnimation(motion) { page = .categories }
                 } label: {
                     CategoriesGlyph(categories: store.data.categories(for: .expense))
                 }
@@ -221,7 +249,7 @@ struct HomeScreen: View {
 
     // MARK: - Grafik
 
-    private var bubbles: some View {
+    private func bubbles(_ summary: MonthSummary) -> some View {
         BubbleField(
             summary: summary,
             onTap: { sheet = .detail($0.category.id) },
@@ -241,14 +269,14 @@ struct HomeScreen: View {
 
     /// Monat und Ergebnis über der Grafik: Der Monat ist die Überschrift der
     /// Seite, das Saldo die Zahl darunter.
-    private var figureBlock: some View {
+    private func figureBlock(_ m: YearMonth, _ summary: MonthSummary) -> some View {
         VStack(spacing: 2) {
             HStack(spacing: 6) {
-                monthStep(-1, "chevron.left")
-                monthMenu
-                monthStep(1, "chevron.right")
+                monthStep(from: m, -1, "chevron.left")
+                monthMenu(m)
+                monthStep(from: m, 1, "chevron.right")
             }
-            let figure = centerFigure
+            let figure = centerFigure(summary)
             Text(figure.text)
                 .font(.system(size: 44, weight: .bold))
                 .monospacedDigit()
@@ -264,13 +292,11 @@ struct HomeScreen: View {
                 .foregroundStyle(Palette.muted)
         }
         .frame(maxWidth: .infinity)
-        .animation(motion, value: month)
     }
 
-    /// Einen Monat vor oder zurück. Der Pager nimmt sich die Wischgeste, also
-    /// gibt es Pfeile — und keine Zukunft.
-    private func monthStep(_ step: Int, _ symbol: String) -> some View {
-        let next = month.advanced(by: step)
+    /// Einen Monat vor oder zurück — dasselbe wie Wischen, nur mit Pfeil. Keine Zukunft.
+    private func monthStep(from m: YearMonth, _ step: Int, _ symbol: String) -> some View {
+        let next = m.advanced(by: step)
         let allowed = next <= YearMonth.current()
         return Button {
             withAnimation(motion) { month = next }
@@ -286,13 +312,13 @@ struct HomeScreen: View {
         .accessibilityLabel(step < 0 ? "Vormonat" : "Folgemonat")
     }
 
-    private var monthMenu: some View {
+    private func monthMenu(_ m: YearMonth) -> some View {
         Menu {
             ForEach(selectableMonths, id: \.self) { candidate in
                 Button {
                     withAnimation(motion) { month = candidate }
                 } label: {
-                    if candidate == month {
+                    if candidate == m {
                         Label(MoneyFormat.month(candidate), systemImage: "checkmark")
                     } else {
                         Text(MoneyFormat.month(candidate))
@@ -301,7 +327,7 @@ struct HomeScreen: View {
             }
         } label: {
             HStack(spacing: 3) {
-                Text(MoneyFormat.month(month))
+                Text(MoneyFormat.month(m))
                     .contentTransition(.numericText())
                 Image(systemName: "chevron.down")
                     .font(.system(size: 10, weight: .bold))
@@ -316,7 +342,7 @@ struct HomeScreen: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Monat: \(MoneyFormat.month(month))")
+        .accessibilityLabel("Monat: \(MoneyFormat.month(m))")
     }
 
     /// Die letzten zwölf Monate, dazu alles, worin etwas steht.
@@ -334,7 +360,7 @@ struct HomeScreen: View {
 
     /// Solange nur eine Seite Zahlen hat, gibt es kein „Übrig" — ein Monat ohne
     /// erfasste Einnahmen ist kein Monat mit Verlust.
-    private var centerFigure: CenterFigure {
+    private func centerFigure(_ summary: MonthSummary) -> CenterFigure {
         if summary.isEmpty {
             return CenterFigure(caption: "noch nichts", text: "—", tone: Palette.faint)
         }
@@ -360,7 +386,7 @@ struct HomeScreen: View {
 
     // MARK: - Summen
 
-    private var totals: some View {
+    private func totals(_ summary: MonthSummary) -> some View {
         HStack(spacing: 0) {
             ForEach(Direction.allCases, id: \.self) { direction in
                 TotalSegment(
@@ -485,7 +511,7 @@ struct HomeScreen: View {
 
     private func openRequestedEntry() {
         guard let direction = router.consume() else { return }
-        page = 0
+        page = .month(month)
         sheet = .quickEntry(direction)
     }
 
