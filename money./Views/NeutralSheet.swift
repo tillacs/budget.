@@ -11,6 +11,7 @@ struct NeutralSheet: View {
     let month: YearMonth
 
     @Environment(\.dismiss) private var dismiss
+    @State private var showsAdd = false
 
     private var transfers: [Entry] {
         store.data.entries
@@ -57,7 +58,7 @@ struct NeutralSheet: View {
                     }
                 }
                 if refunds.isEmpty && transfers.isEmpty {
-                    Text("Nichts Neutrales in diesem Monat.")
+                    Text("Nichts Neutrales in diesem Monat. Über \u{201E}Hinzufügen\u{201C} lässt sich jede Buchung hierher verschieben.")
                         .font(.subheadline)
                         .foregroundStyle(Palette.muted)
                         .listRowBackground(Palette.card)
@@ -69,6 +70,15 @@ struct NeutralSheet: View {
             .navigationTitle("Neutral")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { showsAdd = true } label: {
+                        Label("Hinzufügen", systemImage: "plus")
+                            .labelStyle(.titleAndIcon)
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(Palette.ink)
+                    }
+                }
+                .sharedBackgroundVisibility(.hidden)
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Fertig") { dismiss() }.fontWeight(.semibold).foregroundStyle(Palette.ink)
                 }
@@ -77,6 +87,9 @@ struct NeutralSheet: View {
         }
         .tint(Palette.accent)
         .presentationDetents([.medium, .large])
+        .sheet(isPresented: $showsAdd) {
+            NeutralAddSheet(store: store, month: month)
+        }
     }
 
     private func row(_ entry: Entry) -> some View {
@@ -122,5 +135,94 @@ struct NeutralSheet: View {
             }
         }
         .listRowBackground(Palette.card)
+    }
+}
+
+/// Eine Buchung nach Neutral holen: alle zählenden Buchungen, der gewählte Monat
+/// zuerst, mit Suche nach Name, Kategorie oder Betrag.
+struct NeutralAddSheet: View {
+    let store: AppStore
+    let month: YearMonth
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+    @State private var moved = 0
+
+    private var candidates: [Entry] {
+        store.data.entries
+            .filter { $0.counts && $0.kind == .flow }
+            .sorted { a, b in
+                let am = a.month == month, bm = b.month == month
+                if am != bm { return am }
+                return (a.date, a.createdAt) > (b.date, b.createdAt)
+            }
+    }
+
+    private var matching: [Entry] {
+        let needle = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !needle.isEmpty else { return Array(candidates.prefix(200)) }
+        return candidates.filter { item in
+            let category = store.data.category(item.categoryID)?.name ?? ""
+            return [item.title, item.note, item.merchant ?? "", category,
+                    MoneyFormat.amount(item.amount), MoneyFormat.plain(item.amount)]
+                .joined(separator: " ").lowercased().contains(needle)
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach(matching) { entry in
+                        Button {
+                            moved += 1
+                            store.reject(entry.id, as: .transfer)
+                            dismiss()
+                        } label: {
+                            HStack(spacing: 12) {
+                                if let category = store.data.category(entry.categoryID) {
+                                    CategoryBadge(category: category, side: 32)
+                                }
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(entry.title.isEmpty ? (store.data.category(entry.categoryID)?.name ?? "Ohne Namen") : entry.title)
+                                        .font(.subheadline.weight(.medium))
+                                        .foregroundStyle(Palette.ink)
+                                        .lineLimit(1)
+                                    Text("\(MoneyFormat.dayLong(entry.date)) · \(store.data.category(entry.categoryID)?.name ?? "")")
+                                        .font(.caption)
+                                        .foregroundStyle(Palette.faint)
+                                        .lineLimit(1)
+                                }
+                                Spacer()
+                                Text(MoneyFormat.signed(entry.signedAmount))
+                                    .font(.subheadline.weight(.semibold))
+                                    .monospacedDigit()
+                                    .foregroundStyle(entry.signedAmount > 0 ? Palette.positive : Palette.ink)
+                            }
+                        }
+                        .listRowBackground(Palette.card)
+                    }
+                } header: {
+                    Text("Nach Neutral verschieben")
+                } footer: {
+                    Text("Die Buchung zählt danach nirgends mehr mit und lässt sich unter Neutral wieder einer Kategorie geben.")
+                }
+            }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(Palette.canvas)
+            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Name, Kategorie oder Betrag")
+            .navigationTitle("Hinzufügen")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Abbrechen") { dismiss() }.foregroundStyle(Palette.muted)
+                }
+                .sharedBackgroundVisibility(.hidden)
+            }
+        }
+        .tint(Palette.accent)
+        .presentationDetents([.large])
+        .sensoryFeedback(.success, trigger: moved)
     }
 }

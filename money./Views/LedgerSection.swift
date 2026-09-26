@@ -206,10 +206,8 @@ struct LedgerSection: View {
                               systemImage: "arrow.uturn.backward")
                     }
                 }
-                if entry.source == .tradeRepublic {
-                    Button { store.reject(entry.id, as: .transfer) } label: {
-                        Label("Als Umbuchung", systemImage: "arrow.left.arrow.right")
-                    }
+                Button { store.reject(entry.id, as: .transfer) } label: {
+                    Label("Nach Neutral verschieben", systemImage: "arrow.left.arrow.right")
                 }
                 Button(role: .destructive) {
                     withAnimation(motion) { store.deleteEntry(entry.id) }
