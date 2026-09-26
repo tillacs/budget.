@@ -2,8 +2,9 @@
 // budget. — die Vogelperspektive
 //
 // Ein Monat ist eine Fläche mit Blasen: eine je Kategorie, Fläche nach Summe,
-// bewusst ohne Zahl. Drei Schwerkraftzentren — Ausgaben, Einnahmen, Investiert —
-// statt Überschriften. Die Blasen finden ihren Platz in einer kleinen
+// bewusst ohne Zahl. Die Fläche zeigt immer eine Seite — Ausgaben, Einnahmen oder
+// Investiert, so wie die Summenleiste darüber steht — mit einem Schwerpunkt in der
+// Mitte. Die neutrale Blase bleibt klein am Rand, auf jeder Seite. Die Blasen finden ihren Platz in einer kleinen
 // Kräftesimulation und behalten ihn, wenn der Monat wechselt: Dieselbe Kategorie
 // bleibt an ihrem Ort, so wird der Vergleich zweier Monate zur Bewegung.
 //
@@ -26,9 +27,9 @@ struct Bubble: Identifiable, Hashable {
     static let neutralCategory = BudgetCategory(
         id: BudgetCategory.noneID, name: "Neutral", symbol: "⇄", tint: .slate, direction: .expense)
 
-    static func from(_ summary: MonthSummary) -> [Bubble] {
+    static func from(_ summary: MonthSummary, direction only: Direction? = nil) -> [Bubble] {
         var result: [Bubble] = []
-        for direction in Direction.allCases {
+        for direction in Direction.allCases where only == nil || only == direction {
             for slice in summary.ring(direction).slices {
                 result.append(Bubble(
                     id: slice.category.id.uuidString, category: slice.category, direction: direction,
@@ -58,7 +59,10 @@ nonisolated enum BubbleLayout {
         var radius: CGFloat
     }
 
-    static func center(for direction: Direction, in size: CGSize) -> CGPoint {
+    /// Eine Seite allein sammelt sich in der Mitte; alle drei zusammen haben je
+    /// ein eigenes Zentrum.
+    static func center(for direction: Direction, in size: CGSize, focused: Bool) -> CGPoint {
+        if focused { return CGPoint(x: size.width * 0.5, y: size.height * 0.52) }
         switch direction {
         case .expense: return CGPoint(x: size.width * 0.36, y: size.height * 0.56)
         case .income: return CGPoint(x: size.width * 0.76, y: size.height * 0.26)
@@ -67,16 +71,16 @@ nonisolated enum BubbleLayout {
     }
 
     static func solve(
-        _ bubbles: [Bubble], in size: CGSize, previous: [String: Placement]
+        _ bubbles: [Bubble], in size: CGSize, previous: [String: Placement], focused: Bool = false
     ) -> [String: Placement] {
         guard !bubbles.isEmpty, size.width > 0, size.height > 0 else { return [:] }
 
         // Fläche proportional zur Summe; zusammen füllen die Blasen etwa die Hälfte.
         let values = bubbles.map { max(0.0, $0.total.doubleValue) }
         let sum = values.reduce(0, +)
-        let usable = Double(size.width * size.height) * 0.52
+        let usable = Double(size.width * size.height) * (focused ? 0.58 : 0.52)
         let k = sum > 0 ? sqrt(usable / (.pi * sum)) : 1
-        let maxRadius = Double(min(size.width, size.height)) * 0.34
+        let maxRadius = Double(min(size.width, size.height)) * (focused ? 0.4 : 0.34)
         let minRadius = 16.0
 
         var radii: [Double] = values.map { min(maxRadius, max(minRadius, k * sqrt($0))) }
@@ -96,7 +100,7 @@ nonisolated enum BubbleLayout {
             // damit dieselben Daten immer dasselbe Bild ergeben.
             let home = bubble.isNeutral
                 ? CGPoint(x: size.width * 0.12, y: size.height * 0.14)
-                : center(for: bubble.direction, in: size)
+                : center(for: bubble.direction, in: size, focused: focused)
             let angle = Double(index) * 2.399 // goldener Winkel
             return CGPoint(x: home.x + CGFloat(cos(angle)) * 18, y: home.y + CGFloat(sin(angle)) * 18)
         }
@@ -107,7 +111,7 @@ nonisolated enum BubbleLayout {
             for i in bubbles.indices {
                 let home = bubbles[i].isNeutral
                     ? CGPoint(x: size.width * 0.12, y: size.height * 0.14)
-                    : center(for: bubbles[i].direction, in: size)
+                    : center(for: bubbles[i].direction, in: size, focused: focused)
                 points[i].x += (home.x - points[i].x) * pull
                 points[i].y += (home.y - points[i].y) * pull
             }
@@ -142,6 +146,8 @@ nonisolated enum BubbleLayout {
 
 struct BubbleField: View {
     let summary: MonthSummary
+    /// Die Seite, die zu sehen ist. Ohne: alle drei mit eigenen Zentren.
+    var direction: Direction? = nil
     let onTap: (Bubble) -> Void
     let onPendingTap: () -> Void
     var onNeutralTap: () -> Void = {}
@@ -153,7 +159,7 @@ struct BubbleField: View {
     @State private var pressing = false
     @State private var appeared = false
 
-    private var bubbles: [Bubble] { Bubble.from(summary) }
+    private var bubbles: [Bubble] { Bubble.from(summary, direction: direction) }
 
     var body: some View {
         GeometryReader { proxy in
@@ -167,7 +173,7 @@ struct BubbleField: View {
                                 else if bubble.isPending { onPendingTap() }
                                 else { onTap(bubble) }
                             }
-                            .transition(.scale(scale: 0.2).combined(with: .opacity))
+                            .transition(.scale(scale: 0.3).combined(with: .opacity))
                     }
                 }
             }
@@ -176,6 +182,7 @@ struct BubbleField: View {
             .onAppear { relayout(proxy.size) }
             .onChange(of: proxy.size) { _, new in relayout(new) }
             .onChange(of: summary) { relayout(proxy.size) }
+            .onChange(of: direction) { relayout(proxy.size) }
         }
         // Kein DragGesture: Das würde der Seite darunter das Scrollen wegnehmen.
         // Gedrückt halten schaltet die Zahlen nach kurzer Zeit ein, loslassen aus.
@@ -193,6 +200,7 @@ struct BubbleField: View {
         }
         .sensoryFeedback(.impact(flexibility: .soft), trigger: holding) { _, new in new }
         .animation(motion, value: placements)
+        .animation(motion, value: bubbles.map(\.id))
         .animation(.easeOut(duration: 0.18), value: holding)
         .accessibilityElement(children: .contain)
     }
@@ -200,7 +208,7 @@ struct BubbleField: View {
     private func relayout(_ newSize: CGSize) {
         size = newSize
         let previous = placements
-        let solved = BubbleLayout.solve(bubbles, in: newSize, previous: previous)
+        let solved = BubbleLayout.solve(bubbles, in: newSize, previous: previous, focused: direction != nil)
         if placements.isEmpty && !solved.isEmpty && !appeared {
             // Erstes Erscheinen: aus der Mitte heraus wachsen.
             appeared = true

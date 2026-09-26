@@ -252,13 +252,16 @@ struct HomeScreen: View {
     private func bubbles(_ summary: MonthSummary) -> some View {
         BubbleField(
             summary: summary,
+            direction: listDirection,
             onTap: { sheet = .detail($0.category.id) },
             onPendingTap: { sheet = .inbox },
             onNeutralTap: { sheet = .neutral })
             .frame(height: 340)
             .overlay(alignment: .bottom) {
-                if summary.isEmpty && !summary.hasPending {
-                    Text("Doppeltipp auf die Rückseite, das Plus —\noder einen Export von Trade Republic teilen.")
+                if summary.ring(listDirection).isEmpty && (summary.pending[listDirection] ?? []).isEmpty {
+                    Text(summary.isEmpty && !summary.hasPending
+                         ? "Doppeltipp auf die Rückseite, das Plus —\noder einen Export von Trade Republic teilen."
+                         : "Keine \(listDirection.plural) in diesem Monat.")
                         .font(.caption)
                         .multilineTextAlignment(.center)
                         .foregroundStyle(Palette.faint)
