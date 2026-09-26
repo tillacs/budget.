@@ -210,9 +210,13 @@ nonisolated enum ImportPipeline {
             }
 
             // Saveback- und Round-up-Käufe: eigene Kategorien im Depot, nicht „Sparplan".
+            // Round-up hat kein eigenes Kennzeichen im Export — es ist die Sparplan-
+            // Ausführung mit krummem Betrag zwischen den regulären Raten.
             if let kind = buyKind[row.transactionID] {
                 draft.importType = kind
             } else if row.type == "BUY", row.description.lowercased().contains("round") {
+                draft.importType = "BUY_ROUNDUP"
+            } else if row.isSavingsPlan, !Self.isPlanRate(draft.amount) {
                 draft.importType = "BUY_ROUNDUP"
             }
             if let prior = SuggestionEngine.typePrior(draft.importType), prior.direction == draft.direction,
@@ -402,6 +406,15 @@ nonisolated enum ImportPipeline {
     /// Gutschriften, die Trade Republic für das Depot bezahlt: Saveback, Round-up.
     static func isBenefit(_ type: String) -> Bool {
         type == "BENEFITS_SAVEBACK" || type.contains("ROUND")
+    }
+
+    /// Eine reguläre Sparplanrate ist ein glatter Betrag — Vielfaches von 5 €.
+    /// 7,40 € oder 15,90 € sind aufgerundete Cents der Woche, kein Sparplan.
+    static func isPlanRate(_ amount: Decimal) -> Bool {
+        var quotient = amount / 5
+        var rounded = Decimal()
+        NSDecimalRound(&rounded, &quotient, 0, .plain)
+        return rounded == quotient && amount >= 5
     }
 
     /// Legt eine Kategorie an, falls es sie in dieser Richtung nicht gibt.

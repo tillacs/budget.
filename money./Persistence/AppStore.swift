@@ -39,6 +39,7 @@ final class AppStore {
                 // Was die App inzwischen dazugelernt hat, soll auch für alte Vorschläge gelten.
                 store.rerankProposals()
                 store.repairTransferDirections()
+                store.repairInvestmentKinds()
                 return store
             }
         } catch {
@@ -593,6 +594,56 @@ final class AppStore {
                 if entry.direction != wanted { entry.direction = wanted; changed = true }
             }
             data.entries[i] = entry
+        }
+        if changed { persist() }
+    }
+
+    /// Depot-Käufe nach den aktuellen Regeln nachsortieren: Saveback- und Round-up-
+    /// Käufe, die eine frühere Version als Sparplan gebucht hat. Nur, was die
+    /// Maschine selbst gebucht hat — was der Nutzer bestätigt hat, bleibt.
+    func repairInvestmentKinds() {
+        var changed = false
+        let credits = data.entries.filter { ($0.importType.map(ImportPipeline.isBenefit) ?? false) && $0.isInflow }
+        var takenCredits: Set<UUID> = []
+        for i in data.entries.indices {
+            let entry = data.entries[i]
+            guard entry.source == .tradeRepublic, entry.direction == .invest, entry.kind == .flow,
+                  let type = entry.importType, type.hasPrefix("BUY") else { continue }
+            var wanted = type
+            // Paar: Gutschrift bis fünf Tage davor, gleicher Betrag, gleiche ISIN.
+            if let credit = credits.first(where: { c in
+                !takenCredits.contains(c.id) && c.amount == entry.amount
+                    && c.date <= entry.date && SuggestionEngine.daysBetween(c.date, entry.date) <= 5
+                    && (c.isin == nil || c.isin == entry.isin)
+            }) {
+                takenCredits.insert(credit.id)
+                wanted = (credit.importType ?? "").contains("ROUND") ? "BUY_ROUNDUP" : "BUY_SAVEBACK"
+                if data.entries[i].pairedWith == nil, let ci = data.entries.firstIndex(where: { $0.id == credit.id }) {
+                    data.entries[i].pairedWith = credit.id
+                    data.entries[ci].pairedWith = entry.id
+                    changed = true
+                }
+            } else if type == "BUY_SAVINGS_PLAN", !ImportPipeline.isPlanRate(entry.amount) {
+                wanted = "BUY_ROUNDUP"
+            } else if type == "BUY_SAVEBACK" || type == "BUY_ROUNDUP" {
+                // Ohne Gutschrift war das Paar ein Irrtum; krumm bleibt Round-up.
+                wanted = ImportPipeline.isPlanRate(entry.amount) ? "BUY_SAVINGS_PLAN" : "BUY_ROUNDUP"
+            }
+            guard wanted != type else { continue }
+            data.entries[i].importType = wanted
+            changed = true
+            if entry.status != .confirmed, let prior = SuggestionEngine.typePrior(wanted),
+               let name = prior.names.first {
+                let symbol = name == "Saveback" ? "🎁" : (name == "Round-up" ? "🔄" : "📈")
+                let tint: CategoryTint = name == "Saveback" ? .rose : (name == "Round-up" ? .teal : .indigo)
+                ImportPipeline.ensure(&data, .invest, name, symbol, tint)
+                if let target = data.categories(for: .invest).first(where: { $0.name == name }) {
+                    data.entries[i].categoryID = target.id
+                    data.entries[i].suggestion = Suggestion(
+                        categoryID: target.id, confidence: 0.9,
+                        evidence: [Evidence(kind: .type, text: prior.label, strength: prior.strength)])
+                }
+            }
         }
         if changed { persist() }
     }

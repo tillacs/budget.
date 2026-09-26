@@ -438,6 +438,40 @@ struct ImportPipelineTests {
         #expect(outcome.data.category(plan.categoryID)?.name == "Sparplan")
     }
 
+    /// Round-up hat kein Kennzeichen: Es ist die Sparplan-Ausführung mit krummem
+    /// Betrag zwischen den glatten Raten.
+    @Test func krummeSparplanAusführungenSindRoundUp() throws {
+        let body = "\"2026-09-02T10:01:00Z\",\"2026-09-02\",\"DEFAULT\",\"TRADING\",\"BUY\",\"FUND\",\"Core MSCI World\",\"IE00B4L5Y983\",\"1\",\"100\",\"-250.00\",\"\",\"\",\"EUR\",\"\",\"\",\"\",\"Savings plan execution IE00B4L5Y983\",\"rate\",\"\",\"\",\"\",\"\"\n"
+            + "\"2026-09-09T10:01:00Z\",\"2026-09-09\",\"DEFAULT\",\"TRADING\",\"BUY\",\"FUND\",\"MSCI Europe Small Cap\",\"LU0322253906\",\"0.1\",\"100\",\"-12.53\",\"\",\"\",\"EUR\",\"\",\"\",\"\",\"Savings plan execution LU0322253906\",\"ru\",\"\",\"\",\"\",\"\"\n"
+        let outcome = ImportPipeline.run(rows: try rows(body), into: .seeded())
+        let rate = try #require(outcome.data.entries.first { $0.externalID == "rate" })
+        let roundup = try #require(outcome.data.entries.first { $0.externalID == "ru" })
+        #expect(outcome.data.category(rate.categoryID)?.name == "Sparplan")
+        #expect(outcome.data.category(roundup.categoryID)?.name == "Round-up")
+        #expect(ImportPipeline.isPlanRate(15))
+        #expect(!ImportPipeline.isPlanRate(Decimal(string: "7.40")!))
+    }
+
+    /// Ältere Importe werden beim Start nachsortiert — außer, der Nutzer hat selbst entschieden.
+    @MainActor @Test func depotKäufeWerdenNachsortiert() throws {
+        let store = AppStore(data: .seeded(), file: DataFile(
+            fileURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("budget-depot-\(UUID().uuidString).json")))
+        let sparplan = try #require(store.data.categories.first { $0.name == "Sparplan" && $0.direction == .invest })
+        let old = Entry(date: CalendarDate(year: 2026, month: 9, day: 16), amount: Decimal(string: "15.90")!,
+                        direction: .invest, categoryID: sparplan.id, source: .tradeRepublic, externalID: "o",
+                        merchant: "MSCI Europe Small Cap", isin: "LU0322253906", importType: "BUY_SAVINGS_PLAN",
+                        inflow: false, status: .autoBooked)
+        let chosen = Entry(date: CalendarDate(year: 2026, month: 9, day: 23), amount: Decimal(string: "7.40")!,
+                           direction: .invest, categoryID: sparplan.id, source: .tradeRepublic, externalID: "c",
+                           merchant: "MSCI Europe Small Cap", isin: "LU0322253906", importType: "BUY_SAVINGS_PLAN",
+                           inflow: false, status: .confirmed)
+        store.add(old); store.add(chosen)
+        store.repairInvestmentKinds()
+        #expect(store.data.category(store.entry(old.id)!.categoryID)?.name == "Round-up")
+        #expect(store.entry(chosen.id)?.categoryID == sparplan.id)
+    }
+
     @Test func sparplanUndZinsenBekommenIhreKategorien() throws {
         let body = "\"2025-08-04T10:01:00Z\",\"2025-08-04\",\"DEFAULT\",\"TRADING\",\"BUY\",\"FUND\",\"Core MSCI World\",\"IE00B4L5Y983\",\"0.1\",\"100\",\"-10.00\",\"\",\"\",\"EUR\",\"\",\"\",\"\",\"Savings plan execution IE00B4L5Y983\",\"sp\",\"\",\"\",\"\",\"\"\n"
             + "\"2025-08-01T07:21:40Z\",\"2025-08-01\",\"DEFAULT\",\"CASH\",\"INTEREST_PAYMENT\",\"\",\"\",\"\",\"\",\"\",\"1.940000\",\"\",\"\",\"EUR\",\"\",\"\",\"\",\"Interest payment for payout collection x\",\"int\",\"\",\"\",\"\",\"\"\n"
