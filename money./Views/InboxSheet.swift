@@ -384,13 +384,14 @@ private struct InboxRow: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Alle Kategorien")
-                    if entry.kind == .flow {
-                        // „Das ist kein Geld für mich, das gleicht eine Ausgabe aus."
+                    if entry.kind == .flow || linkedOriginal != nil {
+                        // „Das gleicht eine Ausgabe aus" — oder, bei einem Ausgleich-
+                        // Vorschlag: „eine andere Ausgabe als die vorgeschlagene".
                         Button(action: onLink) {
                             HStack(spacing: 5) {
                                 Image(systemName: "arrow.uturn.backward")
                                     .font(.caption.weight(.bold))
-                                Text("Ausgleich")
+                                Text(linkedOriginal != nil ? "Andere Ausgabe …" : "Ausgleich")
                                     .font(.caption.weight(.medium))
                             }
                             .foregroundStyle(Palette.ink)
