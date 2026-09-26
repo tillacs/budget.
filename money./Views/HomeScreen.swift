@@ -84,14 +84,8 @@ struct HomeScreen: View {
                 // Nur der sichtbare Monat und seine Nachbarn werden wirklich gebaut —
                 // ein Pager über ein Jahr würde sonst zwölf Blasenfelder zugleich rechnen.
                 ForEach(pageMonths, id: \.self) { m in
-                    Group {
-                        if abs(m.distance(to: month)) <= 1 {
-                            overview(for: m)
-                        } else {
-                            Palette.canvas
-                        }
-                    }
-                    .tag(HomePage.month(m))
+                    LazyPage { overview(for: m) }
+                        .tag(HomePage.month(m))
                 }
                 CategoriesPage(store: store) { withAnimation(motion) { page = .month(month) } }
                     .tag(HomePage.categories)
@@ -635,4 +629,20 @@ private struct RingGlyph: View {
 
 #Preview("Start") {
     HomeScreen(store: .preview)
+}
+
+/// Eine Seite, die erst gebaut wird, wenn der Pager sie zum ersten Mal zeigt — und
+/// danach stehen bleibt. So rechnet ein Jahr an Monaten nicht auf einmal, und
+/// mitten in einer Wischgeste ändert sich nichts unter dem Finger.
+private struct LazyPage<Content: View>: View {
+    @ViewBuilder let content: () -> Content
+    @State private var appeared = false
+
+    var body: some View {
+        ZStack {
+            Palette.canvas
+            if appeared { content() }
+        }
+        .onAppear { appeared = true }
+    }
 }
