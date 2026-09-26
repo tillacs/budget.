@@ -119,6 +119,7 @@ struct DataFileTests {
             amount: Decimal(string: "12.34")!, direction: .expense,
             categoryID: essen.id, note: "Mittag"))
 
+        try store.flush()
         let geladen = try #require(try file.load())
         #expect(geladen.schemaVersion == AppData.currentSchemaVersion)
         #expect(geladen.entries.count == 1)

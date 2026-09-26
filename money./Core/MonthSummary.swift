@@ -37,6 +37,8 @@ nonisolated struct MonthSummary: Hashable, Sendable {
     let pending: [Direction: [Slice]]
     let transferTotal: Decimal
     let transferCount: Int
+    /// Alle Buchungen des Monats, für den Verlauf.
+    let entryCount: Int
     /// Neutral: Umbuchungen und Ausgleiche. Geld, das sich bewegt hat, ohne etwas
     /// zu kosten oder zu bringen. Zählt nirgends, steht aber nicht im Verborgenen.
     let neutralTotal: Decimal
@@ -99,8 +101,9 @@ nonisolated struct MonthSummary: Hashable, Sendable {
         // im Monat des letzten Ausgleichs, damit er dort auftaucht, wo das Geld kam.
         var surpluses: [Entry] = []
         let byOriginal = Dictionary(grouping: entries.filter { $0.kind == .refund && $0.status != .proposed && $0.refundOf != nil }, by: { $0.refundOf! })
+        let byID = byOriginal.isEmpty ? [:] : Dictionary(entries.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         for (originalID, refunds) in byOriginal {
-            guard let original = entries.first(where: { $0.id == originalID }) else { continue }
+            guard let original = byID[originalID] else { continue }
             let excess = refunds.reduce(0) { $0 + $1.amount } - original.amount
             guard excess > 0, let last = refunds.max(by: { ($0.date, $0.createdAt) < ($1.date, $1.createdAt) }),
                   last.month == month else { continue }
@@ -124,6 +127,7 @@ nonisolated struct MonthSummary: Hashable, Sendable {
             pending: pending,
             transferTotal: transfers.reduce(0) { $0 + $1.amount },
             transferCount: transfers.count,
+            entryCount: inMonth.count,
             neutralTotal: (transfers + refunds).reduce(0) { $0 + $1.amount },
             neutralCount: transfers.count + refunds.count)
     }

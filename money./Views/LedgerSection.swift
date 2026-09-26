@@ -242,7 +242,7 @@ struct LedgerSection: View {
 
     /// Der Kontoauszug des Monats: alles chronologisch, mit Zuordnung.
     private var historyRow: some View {
-        let count = store.data.entries.filter { $0.month == month }.count
+        let count = store.summary(for: month).entryCount
         return Button(action: onHistory) {
             HStack(spacing: 10) {
                 Image(systemName: "list.bullet.rectangle")

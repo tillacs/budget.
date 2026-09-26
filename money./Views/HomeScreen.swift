@@ -81,8 +81,17 @@ struct HomeScreen: View {
             Palette.canvas.ignoresSafeArea()
 
             TabView(selection: $page) {
+                // Nur der sichtbare Monat und seine Nachbarn werden wirklich gebaut —
+                // ein Pager über ein Jahr würde sonst zwölf Blasenfelder zugleich rechnen.
                 ForEach(pageMonths, id: \.self) { m in
-                    overview(for: m).tag(HomePage.month(m))
+                    Group {
+                        if abs(m.distance(to: month)) <= 1 {
+                            overview(for: m)
+                        } else {
+                            Palette.canvas
+                        }
+                    }
+                    .tag(HomePage.month(m))
                 }
                 CategoriesPage(store: store) { withAnimation(motion) { page = .month(month) } }
                     .tag(HomePage.categories)

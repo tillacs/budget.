@@ -27,6 +27,15 @@ final class AppStore {
 
     private let file: DataFile
 
+    /// Die Monatsrechnung ist teuer (alle Buchungen, Ausgleiche, Überschüsse) und
+    /// wird bei jedem Bildaufbau gebraucht — deshalb je Monat einmal je Änderung.
+    @ObservationIgnored private var summaryCache: [YearMonth: MonthSummary] = [:]
+    @ObservationIgnored private var proposalsCache: [Entry]?
+    @ObservationIgnored private var monthsCache: Set<YearMonth>?
+    /// Speichern läuft im Hintergrund; ein Zähler sorgt dafür, dass nur der
+    /// jüngste Stand gewinnt, wenn mehrere Änderungen schnell hintereinander kommen.
+    @ObservationIgnored private var saveGeneration = 0
+
     init(data: AppData, file: DataFile = .applicationDefault) {
         self.data = data
         self.file = file
@@ -56,7 +65,10 @@ final class AppStore {
     // MARK: - Auswertung
 
     func summary(for month: YearMonth) -> MonthSummary {
-        MonthSummary.make(month: month, entries: data.entries, categories: data.categories)
+        if let cached = summaryCache[month] { return cached }
+        let made = MonthSummary.make(month: month, entries: data.entries, categories: data.categories)
+        summaryCache[month] = made
+        return made
     }
 
     func entries(of category: UUID, in month: YearMonth) -> [Entry] {
@@ -65,7 +77,8 @@ final class AppStore {
 
     /// Monate, in denen etwas steht — plus der laufende, damit man immer irgendwo steht.
     func recordedMonths(including month: YearMonth) -> Set<YearMonth> {
-        data.entries.recordedMonths.union([month, .current()])
+        if monthsCache == nil { monthsCache = data.entries.recordedMonths }
+        return (monthsCache ?? []).union([month, .current()])
     }
 
     /// Die Ausgleiche, die an dieser Buchung hängen.
@@ -79,8 +92,13 @@ final class AppStore {
         max(0, entry.amount - refunds(of: entry.id).reduce(0) { $0 + $1.amount })
     }
 
-    var proposals: [Entry] { data.proposals }
-    var hasProposals: Bool { data.entries.contains { $0.status == .proposed } }
+    var proposals: [Entry] {
+        if let cached = proposalsCache { return cached }
+        let made = data.proposals
+        proposalsCache = made
+        return made
+    }
+    var hasProposals: Bool { !proposals.isEmpty }
 
     func entry(_ id: UUID?) -> Entry? {
         guard let id else { return nil }
@@ -660,11 +678,30 @@ final class AppStore {
 
     private func persist() {
         revision += 1
-        do {
-            try file.save(data)
-        } catch {
-            saveErrorMessage = "Speichern fehlgeschlagen: \(error.localizedDescription)"
+        summaryCache = [:]
+        proposalsCache = nil
+        monthsCache = nil
+        // Im Hintergrund schreiben: Die Datei ist bei 1.600 Buchungen samt Begründungen
+        // ein paar hundert Kilobyte — das darf die Geste nicht anhalten.
+        saveGeneration += 1
+        let generation = saveGeneration
+        let snapshot = data
+        let file = file
+        Task.detached(priority: .utility) {
+            do {
+                try file.save(snapshot)
+            } catch {
+                await MainActor.run { [weak self] in
+                    guard let self, generation == self.saveGeneration else { return }
+                    self.saveErrorMessage = "Speichern fehlgeschlagen: \(error.localizedDescription)"
+                }
+            }
         }
+    }
+
+    /// Für Tests: den aktuellen Stand sofort schreiben.
+    func flush() throws {
+        try file.save(data)
     }
 }
 

@@ -83,6 +83,11 @@ nonisolated struct YearMonth: Hashable, Comparable, Codable, Sendable {
         let zeroBased = year * 12 + (month - 1) + months
         return YearMonth(year: zeroBased / 12, month: zeroBased % 12 + 1)
     }
+
+    /// Monate von hier bis dort, mit Vorzeichen.
+    func distance(to other: YearMonth) -> Int {
+        (other.year * 12 + other.month) - (year * 12 + month)
+    }
 }
 
 nonisolated extension Character {
