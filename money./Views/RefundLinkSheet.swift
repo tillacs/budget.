@@ -102,9 +102,25 @@ struct RefundLinkSheet: View {
         .listRowBackground(Palette.card)
     }
 
+    /// Wo die Buchung gerade steht — damit klar ist, was ein Tipp verändert.
+    private func whereabouts(_ item: Entry) -> String {
+        if item.kind == .transfer { return "Neutral" }
+        if item.kind == .refund, let id = item.refundOf, let original = store.entry(id) {
+            return "Ausgleich für \(original.title.isEmpty ? (store.data.category(original.categoryID)?.name ?? "") : original.title)"
+        }
+        if item.status == .proposed { return "offen" }
+        return store.data.category(item.categoryID)?.name ?? ""
+    }
+
     private func row(_ item: Entry, highlighted: Bool) -> some View {
         HStack(spacing: 12) {
-            if let category = store.data.category(item.categoryID) {
+            if item.kind == .transfer {
+                Image(systemName: "arrow.left.arrow.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Palette.faint)
+                    .frame(width: 32, height: 32)
+                    .background(Circle().fill(Palette.raised))
+            } else if let category = store.data.category(item.categoryID) {
                 CategoryBadge(category: category, side: 32)
             } else {
                 Circle().fill(Palette.raised).frame(width: 32, height: 32)
@@ -114,9 +130,10 @@ struct RefundLinkSheet: View {
                     .font(.subheadline.weight(highlighted ? .semibold : .medium))
                     .foregroundStyle(Palette.ink)
                     .lineLimit(1)
-                Text(MoneyFormat.dayLong(item.date))
+                Text(highlighted ? MoneyFormat.dayLong(item.date) : "\(MoneyFormat.dayLong(item.date)) · \(whereabouts(item))")
                     .font(.caption)
                     .foregroundStyle(Palette.faint)
+                    .lineLimit(1)
             }
             Spacer()
             Text(MoneyFormat.signed(item.signedAmount))

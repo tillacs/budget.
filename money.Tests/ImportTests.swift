@@ -358,6 +358,28 @@ struct ImportPipelineTests {
         #expect(eingang.refundOf == data.entries[0].id)
     }
 
+    /// Ein Eingang, der versehentlich in Neutral liegt, taucht in der Auswahl auf
+    /// und lässt sich von dort als Ausgleich holen.
+    @MainActor @Test func ausgleichAuswahlZeigtAuchNeutrales() throws {
+        let store = AppStore(data: .seeded(), file: DataFile(
+            fileURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("budget-alle-\(UUID().uuidString).json")))
+        let essen = try #require(store.data.categories.first { $0.name == "Essen" })
+        let gehalt = try #require(store.data.categories.first { $0.name == "Gehalt" })
+        let pizza = Entry(amount: 32, direction: .expense, categoryID: essen.id, note: "Pizza")
+        let back = Entry(amount: 16, direction: .income, categoryID: gehalt.id, note: "Freund",
+                         source: .tradeRepublic, externalID: "x", importType: "TRANSFER_INBOUND", inflow: true)
+        store.add(pizza); store.add(back)
+        store.reject(back.id, as: .transfer)
+        #expect(store.entry(back.id)?.kind == .transfer)
+
+        #expect(store.refundCandidates(for: pizza).map(\.id).contains(back.id))
+        store.linkRefund(back.id, to: pizza.id)
+        #expect(store.entry(back.id)?.kind == .refund)
+        #expect(store.entry(back.id)?.refundOf == pizza.id)
+        #expect(store.netAmount(of: pizza) == 16)
+    }
+
     @Test func eigeneIBANZähltAuchOhneNamen() throws {
         var data = AppData.seeded()
         data.ownIBANs = ["DE12100110012625980979"]

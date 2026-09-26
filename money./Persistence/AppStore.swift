@@ -218,10 +218,19 @@ final class AppStore {
     /// deren Kategorie, statt als Einnahme zu zählen.
     func linkRefund(_ inboundID: UUID, to originalID: UUID) {
         guard let i = data.entries.firstIndex(where: { $0.id == inboundID }),
-              let original = data.entries.first(where: { $0.id == originalID }),
-              original.kind == .flow, original.direction != .income,
+              let o = data.entries.firstIndex(where: { $0.id == originalID }),
               // Nur Geld, das reinkam, kann eine Ausgabe ausgleichen.
-              data.entries[i].isInflow, !original.isInflow else { return }
+              data.entries[i].isInflow, !data.entries[o].isInflow else { return }
+        // Lag die Ausgabe in Neutral, kommt sie zurück — mit ihrer Seite.
+        if data.entries[o].kind == .transfer {
+            data.entries[o].kind = .flow
+            data.entries[o].direction = .expense
+            data.entries[o].status = .confirmed
+            if data.category(data.entries[o].categoryID) == nil {
+                data.entries[o].categoryID = data.categories(for: .expense).first?.id ?? BudgetCategory.noneID
+            }
+        }
+        let original = data.entries[o]
         var entry = data.entries[i]
         entry.kind = .refund
         entry.direction = original.direction
@@ -270,18 +279,17 @@ final class AppStore {
     }
 
     /// Kandidaten für einen Ausgleich: zu einer Einnahme alle Ausgaben, zu einer
-    /// Ausgabe alle Eingänge — ohne Zeitfenster, denn eine Rückzahlung kann Monate
-    /// später kommen. Sortiert: gleicher Betrag zuerst, dann die zeitlich nächsten.
+    /// Ausgabe alle Eingänge — wirklich alle: auch offene, schon einer Kategorie
+    /// zugeordnete, in Neutral geparkte oder bereits anderswo als Ausgleich
+    /// verbuchte. Was falsch lag, muss sich von hier aus herausholen lassen.
+    /// Sortiert: passender Betrag zuerst, dann die zeitlich nächsten.
     func refundCandidates(for entry: Entry) -> [Entry] {
-        let taken = Set(data.entries.compactMap(\.refundOf))
         let pool = data.entries.filter { other in
-            guard other.id != entry.id, other.kind == .flow,
-                  other.status != .proposed || other.source == .tradeRepublic
-            else { return false }
+            guard other.id != entry.id, other.refundOf != entry.id else { return false }
             if entry.isInflow {
-                return !other.isInflow && !taken.contains(other.id)
+                return !other.isInflow && other.kind != .refund
             } else {
-                return other.isInflow && other.refundOf == nil
+                return other.isInflow
             }
         }
         func distance(_ other: Entry) -> Int {
