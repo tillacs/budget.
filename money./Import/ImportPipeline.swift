@@ -341,20 +341,20 @@ nonisolated enum ImportPipeline {
     }
 
     /// Die Ausgabe, zu der Geld von einer Person passt: (fast) derselbe Betrag,
-    /// innerhalb von 30 Tagen davor, noch ohne Ausgleich. Exakt schlägt ungefähr,
-    /// dann gewinnt die jüngste.
+    /// innerhalb von 30 Tagen davor oder danach — wer vorstreckt, bekommt das Geld
+    /// mal vorher, mal nachher —, noch ohne Ausgleich. Exakt schlägt ungefähr, dann
+    /// gewinnt die zeitlich nächste.
     static func reimbursementTarget(for inbound: Entry, in data: AppData) -> Entry? {
         let taken = Set(data.entries.compactMap(\.refundOf))
         let candidates = data.entries.filter { original in
             original.kind == .flow && original.direction == .expense
                 && original.amount.roughlyEquals(inbound.amount)
-                && original.date <= inbound.date
-                && SuggestionEngine.daysBetween(original.date, inbound.date) <= 30
+                && abs(SuggestionEngine.daysBetween(original.date, inbound.date)) <= 30
                 && !taken.contains(original.id)
         }
         let exact = candidates.filter { $0.amount == inbound.amount }
         return (exact.isEmpty ? candidates : exact)
-            .max { ($0.date, $0.createdAt) < ($1.date, $1.createdAt) }
+            .min { abs(SuggestionEngine.daysBetween($0.date, inbound.date)) < abs(SuggestionEngine.daysBetween($1.date, inbound.date)) }
     }
 
     /// Die Ausgabe, die eine Erstattung senkt: gleicher Händler, innerhalb von 90

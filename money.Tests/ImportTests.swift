@@ -344,6 +344,20 @@ struct ImportPipelineTests {
         #expect(store.entry(aldi.id)?.signedAmount == Decimal(string: "-21.3"))
     }
 
+    /// Das Geld kann auch vor der Ausgabe kommen: Der Freund überweist, danach zahlt man.
+    @Test func ausgleichAuchWennDasGeldZuerstKam() throws {
+        var data = AppData.seeded()
+        let essen = try category(data, "Essen")
+        data.entries.append(Entry(
+            date: CalendarDate(year: 2026, month: 9, day: 20), amount: 24,
+            direction: .expense, categoryID: essen.id, note: "Kino zu zweit"))
+        let body = transfer("v3", "2026-09-15", "24.000000", "TRANSFER_INBOUND", "Person 1", iban: "DE11100000000000000000")
+        let outcome = ImportPipeline.run(rows: try rows(body), into: data)
+        let eingang = try #require(outcome.data.entries.first { $0.externalID == "v3" })
+        #expect(eingang.kind == .refund)
+        #expect(eingang.refundOf == data.entries[0].id)
+    }
+
     @Test func eigeneIBANZähltAuchOhneNamen() throws {
         var data = AppData.seeded()
         data.ownIBANs = ["DE12100110012625980979"]

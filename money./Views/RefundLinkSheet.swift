@@ -61,12 +61,12 @@ struct RefundLinkSheet: View {
                     }
                 }
                 if !recent.isEmpty {
-                    Section(isInbound ? "Davor und danach, 90 Tage" : "Danach, 90 Tage") {
+                    Section("Davor und danach, 90 Tage") {
                         ForEach(recent) { candidate in pick(candidate) }
                     }
                 }
                 if !older.isEmpty {
-                    Section("Früher") {
+                    Section("Weiter entfernt") {
                         ForEach(older.prefix(query.isEmpty ? 60 : 300)) { candidate in pick(candidate) }
                     }
                 }
