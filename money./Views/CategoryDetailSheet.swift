@@ -237,6 +237,12 @@ struct CategoryDetailSheet: View {
                         .foregroundStyle(Palette.positive)
                         .lineLimit(1)
                 }
+                if !refunds.isEmpty, refunds.reduce(0, { $0 + $1.amount }) > entry.amount {
+                    Text("\(MoneyFormat.amount(refunds.reduce(0, { $0 + $1.amount }) - entry.amount)) mehr als die Ausgabe → Einnahme „Überschuss\u{201C}")
+                        .font(.caption2)
+                        .foregroundStyle(Palette.muted)
+                        .lineLimit(1)
+                }
             }
             Spacer(minLength: 6)
             VStack(alignment: .trailing, spacing: 0) {

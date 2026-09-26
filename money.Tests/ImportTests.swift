@@ -382,6 +382,25 @@ struct ImportPipelineTests {
         #expect(store.netAmount(of: pizza) == 16)
     }
 
+    /// 35 € ausgegeben, 40 € zurück: Die Ausgabe steht bei null, 5 € sind Einnahme.
+    @MainActor @Test func überschussEinesAusgleichsWirdEinnahme() throws {
+        let store = AppStore(data: .seeded(), file: DataFile(
+            fileURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("budget-ueberschuss-\(UUID().uuidString).json")))
+        let unterwegs = try #require(store.data.categories.first { $0.name == "Unterwegs" })
+        let gehalt = try #require(store.data.categories.first { $0.name == "Gehalt" })
+        let ticket = Entry(date: CalendarDate(year: 2026, month: 9, day: 10), amount: 35,
+                           direction: .expense, categoryID: unterwegs.id, note: "Ticket")
+        let back = Entry(date: CalendarDate(year: 2026, month: 9, day: 12), amount: 40,
+                         direction: .income, categoryID: gehalt.id, note: "Vater")
+        store.add(ticket); store.add(back)
+        store.linkRefund(back.id, to: ticket.id)
+        let summary = store.summary(for: YearMonth(year: 2026, month: 9))
+        #expect(summary.expenses.total == 0)
+        #expect(summary.income.total == 5)
+        #expect(summary.income.slices.first?.category.isSurplus == true)
+    }
+
     @Test func eigeneIBANZähltAuchOhneNamen() throws {
         var data = AppData.seeded()
         data.ownIBANs = ["DE12100110012625980979"]

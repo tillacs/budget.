@@ -107,7 +107,9 @@ struct NeutralSheet: View {
                 HStack(spacing: 4) {
                     Text(MoneyFormat.day(entry.date))
                     if let original {
-                        Text("· gleicht aus: \(original.title.isEmpty ? (store.data.category(original.categoryID)?.name ?? "") : original.title)")
+                        let excess = store.refunds(of: original.id).reduce(0) { $0 + $1.amount } - original.amount
+                        Text("· gleicht aus: \(original.title.isEmpty ? (store.data.category(original.categoryID)?.name ?? "") : original.title)"
+                             + (excess > 0 ? " · \(MoneyFormat.amount(excess)) mehr → Einnahme" : ""))
                             .lineLimit(1)
                     } else if entry.kind == .refund, let category = store.data.category(entry.categoryID) {
                         Text("· senkt \(category.name)")

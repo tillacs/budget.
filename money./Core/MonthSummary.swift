@@ -95,8 +95,22 @@ nonisolated struct MonthSummary: Hashable, Sendable {
             copy.categoryID = BudgetCategory.unknown(for: copy.direction).id
             return copy
         }
-        let all = counting + unknowns
-        let withUnknown = categories + Direction.allCases.map { BudgetCategory.unknown(for: $0) }
+        // Überschuss: Übersteigen die Ausgleiche eine Ausgabe, ist der Rest Einnahme —
+        // im Monat des letzten Ausgleichs, damit er dort auftaucht, wo das Geld kam.
+        var surpluses: [Entry] = []
+        let byOriginal = Dictionary(grouping: entries.filter { $0.kind == .refund && $0.status != .proposed && $0.refundOf != nil }, by: { $0.refundOf! })
+        for (originalID, refunds) in byOriginal {
+            guard let original = entries.first(where: { $0.id == originalID }) else { continue }
+            let excess = refunds.reduce(0) { $0 + $1.amount } - original.amount
+            guard excess > 0, let last = refunds.max(by: { ($0.date, $0.createdAt) < ($1.date, $1.createdAt) }),
+                  last.month == month else { continue }
+            surpluses.append(Entry(
+                id: last.id, date: last.date, amount: excess, direction: .income,
+                categoryID: BudgetCategory.surplus.id, note: last.title, createdAt: last.createdAt,
+                source: last.source, merchant: last.merchant, inflow: true))
+        }
+        let all = counting + unknowns + surpluses
+        let withUnknown = categories + Direction.allCases.map { BudgetCategory.unknown(for: $0) } + [BudgetCategory.surplus]
         var pending: [Direction: [Slice]] = [:]
         for direction in Direction.allCases {
             let slices = ring(direction, from: proposed, categories: categories).slices

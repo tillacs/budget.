@@ -305,6 +305,20 @@ nonisolated extension BudgetCategory {
     static let unknownIDs: Set<UUID> = Set(Direction.allCases.map { unknown(for: $0).id })
     var isUnknown: Bool { BudgetCategory.unknownIDs.contains(id) }
 
+    /// „Überschuss": Ein Ausgleich, der höher war als die Ausgabe. Was darüber
+    /// hinausgeht, ist Geld für dich — es zählt als Einnahme, statt zu verschwinden.
+    static let surplus = BudgetCategory(
+        id: UUID(uuidString: "00000000-0000-0000-0000-00000000000C")!,
+        name: "Überschuss", symbol: "↩", tint: .mint, direction: .income, sortIndex: 998)
+    var isSurplus: Bool { id == BudgetCategory.surplus.id }
+    /// Die Pseudo-Kategorien, die es ohne Nutzer gibt.
+    var isPseudo: Bool { isUnknown || isSurplus }
+
+    static func pseudo(_ id: UUID) -> BudgetCategory? {
+        if id == surplus.id { return surplus }
+        return Direction.allCases.map { unknown(for: $0) }.first { $0.id == id }
+    }
+
     /// Die „Kategorie" einer Umbuchung: keine. Umbuchungen tauchen in keinem Ring
     /// und keiner Blase auf, brauchen aber einen Wert im Feld.
     static let noneID = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!

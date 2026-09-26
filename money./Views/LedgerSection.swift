@@ -26,6 +26,7 @@ struct LedgerSection: View {
     var onLink: (Entry) -> Void = { _ in }
     var onHistory: () -> Void = {}
     var onInbox: () -> Void = {}
+    var onNeutral: () -> Void = {}
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showsTransfers = false
@@ -385,6 +386,8 @@ struct LedgerSection: View {
     private func toggle(_ slice: Slice) {
         // Unbekannt klappt nicht auf — es führt in den Posteingang, wo es sich klärt.
         if slice.category.isUnknown { onInbox(); return }
+        // Überschuss steckt in den Ausgleichen — unter Neutral.
+        if slice.category.isSurplus { onNeutral(); return }
         withAnimation(motion) {
             if expanded == slice.id {
                 expanded = nil
