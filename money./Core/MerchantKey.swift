@@ -19,6 +19,33 @@ nonisolated enum MerchantKey {
         "MUENCHEN", "MUNCHEN", "MUC", "BERLIN", "HAMBURG", "BAYERN",
     ]
 
+    /// Wörter, an denen man eine Firma, Behörde oder Bank erkennt. Alles andere bei
+    /// einer Überweisung ist ein Mensch — und Menschen schicken Geld für alles Mögliche.
+    static let organizationMarks: [String] = [
+        "GMBH", "AG", "KG", "UG", "OHG", "GBR", "E.V", "EV", "LTD", "INC", "LLC", "PLC", "SE", "SA", "S.A",
+        "SARL", "S.A.R.L", "BV", "B.V", "NV", "N.V", "CO", "CORP", "GROUP", "HOLDING", "STIFTUNG",
+        "BANK", "SPARKASSE", "KASSE", "VERSICHERUNG", "KRANKENKASSE", "FINANZAMT", "AMT", "STADT",
+        "GEMEINDE", "LANDKREIS", "UNIVERSITÄT", "UNIVERSITAET", "HOCHSCHULE", "STUDENTENWERK",
+        "BAFÖG", "BAFOEG", "RENTENVERSICHERUNG", "ARBEITSAGENTUR", "JOBCENTER", "PAYPAL",
+        "MANGOPAY", "KLARNA", "STRIPE", "ADYEN", "REVOLUT", "N26", "WISE", "VODAFONE", "TELEKOM",
+        "ENERGIE", "STADTWERKE", "VERLAG", "SERVICE", "SERVICES", "SOLUTIONS", "SYSTEMS", "MEDIA",
+        "SHOP", "STORE", "MARKT", "APOTHEKE", "PRAXIS", "KANZLEI", "STUDIO", "FITNESS", "GYM",
+        "VEREIN", "CLUB", "SCHULE", "KITA", "WOHNUNGSBAU", "HAUSVERWALTUNG", "IMMOBILIEN", "MIETE",
+    ]
+
+    /// Sieht der Name nach einer Organisation aus? Sonst ist es ein Mensch.
+    static func looksLikeOrganization(_ name: String) -> Bool {
+        let upper = name.uppercased()
+        let words = Set(upper.split { !($0.isLetter || $0 == "." || $0 == "&") }.map(String.init))
+        for mark in organizationMarks where words.contains(mark) { return true }
+        // Längere Kennzeichen zählen auch als Wortteil: „Staatsoberkasse", „Volksbank".
+        for mark in organizationMarks where mark.count >= 5 || mark == "BANK" {
+            if upper.contains(mark) { return true }
+        }
+        // Ein „&" oder ein „e.V." mitten drin sind ebenfalls Firmensache.
+        return upper.contains(" & ") || upper.contains("E.V.") || upper.contains("GMBH")
+    }
+
     /// Präfixe der Zahlungsdienstleister vor dem eigentlichen Namen.
     private static let prefixes = ["PAYPAL *", "PAYPAL*", "SP ", "SQ *", "SQ*", "SUMUP *", "SUMUP*", "IZ *", "IZ*", "BKG*", "AMZN "]
 

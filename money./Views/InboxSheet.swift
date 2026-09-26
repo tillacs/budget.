@@ -247,6 +247,12 @@ private struct InboxRow: View {
                     .foregroundStyle(Palette.ink)
                     .lineLimit(1)
                     .truncationMode(.tail)
+                if entry.isPersonal {
+                    Image(systemName: "person")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Palette.faint)
+                        .accessibilityLabel("Person")
+                }
                 if group.count > 1 {
                     Button(action: onSplit) {
                         HStack(spacing: 3) {

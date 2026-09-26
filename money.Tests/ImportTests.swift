@@ -453,6 +453,50 @@ struct SuggestionEngineTests {
         #expect(card.suggestion.isGuess == false)
     }
 
+    /// Menschen sind keine Regel: Vorschlag ja, mit Verteilung, aber nie Automatik
+    /// und nie „sicher". Firmen dagegen schon.
+    @Test func menschenBekommenSchwacheVorschlägeOhneAutomatik() throws {
+        var data = AppData.seeded()
+        let gehalt = try #require(data.categories.first { $0.name == "Gehalt" })
+        let sonstiges = try #require(data.categories.first { $0.name == "Sonstiges" })
+        let vater = Entry(date: CalendarDate(year: 2026, month: 9, day: 3), amount: 100,
+                          direction: .income, categoryID: BudgetCategory.noneID, source: .tradeRepublic,
+                          merchant: "Max Muster", counterpartyIBAN: "DE11", importType: "TRANSFER_INBOUND")
+        #expect(vater.isPersonal)
+        #expect(vater.signals.tokens.isEmpty)
+        for _ in 0..<5 { data.memory.confirm(vater.signals, as: gehalt.id) }
+        data.memory.confirm(vater.signals, as: sonstiges.id)
+
+        let ranking = try #require(SuggestionEngine.rank(
+            vater, categories: data.categories, memory: data.memory, lastUsed: nil, history: HistoryIndex()))
+        #expect(ranking.suggestion.categoryID == gehalt.id)
+        #expect(ranking.autoEligible == false)
+        #expect(ranking.suggestion.band != .sure)
+        #expect(ranking.suggestion.reason.contains("5× Gehalt"))
+        #expect(ranking.suggestion.reason.contains("1× Sonstiges"))
+        #expect(ranking.suggestion.alternatives.first == sonstiges.id)
+
+        let firma = Entry(date: CalendarDate(year: 2026, month: 9, day: 1), amount: 2400,
+                          direction: .income, categoryID: BudgetCategory.noneID, source: .tradeRepublic,
+                          merchant: "Beispiel GmbH", importType: "TRANSFER_INBOUND")
+        #expect(firma.isPersonal == false)
+        var memory = MerchantMemory()
+        memory.confirm(firma.signals, as: gehalt.id)
+        memory.confirm(firma.signals, as: gehalt.id)
+        let salary = try #require(SuggestionEngine.rank(
+            firma, categories: data.categories, memory: memory, lastUsed: nil, history: HistoryIndex()))
+        #expect(salary.autoEligible)
+        #expect(salary.suggestion.band == .sure)
+    }
+
+    @Test func erkenntOrganisationen() {
+        #expect(MerchantKey.looksLikeOrganization("Beispiel GmbH"))
+        #expect(MerchantKey.looksLikeOrganization("Staatsoberkasse Bayern in Landshut"))
+        #expect(MerchantKey.looksLikeOrganization("PayPal Europe"))
+        #expect(!MerchantKey.looksLikeOrganization("Max Muster"))
+        #expect(!MerchantKey.looksLikeOrganization("Dr. Anna Beispiel"))
+    }
+
     @Test func wiederkehrendesGibtEinenSchub() throws {
         var data = AppData.seeded()
         let abos = try #require(data.categories.first { $0.name == "Abos" })

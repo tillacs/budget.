@@ -85,6 +85,48 @@ nonisolated enum SuggestionEngine {
             return nil
         }
 
+        // 0. Ein Mensch: Der Name ist ein Hinweis, nie eine Regel. Vorgeschlagen wird
+        // das Häufigste, mit der ganzen Verteilung als Begründung, gedeckelt unter
+        // „sicher" — und die Automatik bleibt aus, egal wie oft bestätigt wurde.
+        if draft.isPersonal {
+            var weights: [UUID: Double] = [:]
+            if let key = signals.merchantKey {
+                for (id, w) in MerchantMemory.weights(memory.byMerchant[key], now: now) { weights[id, default: 0] += w }
+            }
+            if let iban = signals.iban {
+                for (id, w) in MerchantMemory.weights(memory.byIBAN[iban], now: now) { weights[id, default: 0] += w * 0.5 }
+            }
+            let ranked = weights.filter { allowed.contains($0.key) }.sorted { $0.value > $1.value }
+            guard let top = ranked.first else {
+                let first = candidates.sorted { $0.sortIndex < $1.sortIndex }[0]
+                return Ranking(
+                    suggestion: Suggestion(categoryID: first.id, confidence: 0,
+                                           alternatives: candidates.dropFirst().prefix(2).map(\.id)),
+                    autoEligible: false)
+            }
+            let total = ranked.reduce(0) { $0 + $1.value }
+            let share = top.value / max(total, 0.001)
+            // Die Verteilung nennt echte Bestätigungen — nur die des Namens, nicht das
+            // halbe Gewicht des Kontos.
+            let counts = signals.merchantKey.map { MerchantMemory.weights(memory.byMerchant[$0], now: now) } ?? [:]
+            let distribution = ranked.prefix(3)
+                .map { "\(Int((counts[$0.key] ?? $0.value).rounded()))× \(name($0.key))" }
+                .joined(separator: ", ")
+            let who = MerchantKey.displayName(draft.merchant ?? "diese Person")
+            var alternatives = ranked.dropFirst().prefix(2).map(\.key)
+            for category in candidates.sorted(by: { $0.sortIndex < $1.sortIndex })
+            where alternatives.count < 2 && category.id != top.key && !alternatives.contains(category.id) {
+                alternatives.append(category.id)
+            }
+            return Ranking(
+                suggestion: Suggestion(
+                    categoryID: top.key,
+                    confidence: min(0.75, 0.35 + 0.4 * share),
+                    alternatives: alternatives,
+                    evidence: [Evidence(kind: .merchant, text: "\(who) bisher \(distribution)", strength: 0.6)]),
+                autoEligible: false)
+        }
+
         // 1. Händler exakt. Wurde derselbe Händler auf zwei Kategorien bestätigt,
         // zählt nur der Überhang — bei Gleichstand sagt der Händler nichts.
         var merchantKnown = false
@@ -207,9 +249,9 @@ nonisolated enum SuggestionEngine {
         // 9. Zuletzt benutzt — nicht bei Überweisungen und Geld an Personen: Eine
         // Zahlung der Eltern hat mit der letzten Dividende nichts zu tun. Dort steht
         // lieber „Wofür?" als ein falscher Name.
-        let isPersonal = (draft.importType?.hasPrefix("TRANSFER") ?? false)
-            || draft.mcc == "4829" || draft.mcc == "6012"
-        if let lastUsed, allowed.contains(lastUsed), scores.isEmpty, !isPersonal {
+        // Überweisungen von Firmen (Gehalt, Behörden) dürfen ebenfalls nicht raten.
+        let isTransfer = draft.importType?.hasPrefix("TRANSFER") ?? false
+        if let lastUsed, allowed.contains(lastUsed), scores.isEmpty, !isTransfer {
             add(lastUsed, 0.25, .lastUsed, "zuletzt \(name(lastUsed))")
         }
 

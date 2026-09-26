@@ -186,12 +186,24 @@ nonisolated struct Entry: Identifiable, Hashable, Codable, Sendable {
         return ""
     }
 
-    /// Die Signale, aus denen gelernt wird.
+    /// Geld von oder an einen Menschen: Überweisung oder PayPal-Freunde, und der
+    /// Name klingt nicht nach Firma. Menschen schicken Geld für alles Mögliche —
+    /// aus ihrem Namen lässt sich keine Regel machen.
+    var isPersonal: Bool {
+        let personalType = (importType?.hasPrefix("TRANSFER") ?? false) || mcc == "4829" || mcc == "6012"
+        guard personalType else { return false }
+        guard let merchant else { return true }
+        return !MerchantKey.looksLikeOrganization(merchant)
+    }
+
+    /// Die Signale, aus denen gelernt wird. Bei Menschen nur Name und Konto: Ihre
+    /// Namensteile und der Überweisungscode sagen nichts über den Zweck.
     var signals: Signals {
-        Signals(
+        let personal = isPersonal
+        return Signals(
             merchantKey: merchant.flatMap(MerchantKey.normalized),
-            tokens: merchant.map(MerchantKey.tokens) ?? [],
-            mcc: mcc,
+            tokens: personal ? [] : (merchant.map(MerchantKey.tokens) ?? []),
+            mcc: personal ? nil : mcc,
             iban: counterpartyIBAN,
             isin: isin,
             // Nur Typen mit eigener Bedeutung (Zinsen, Sparplan …) taugen zum Lernen —

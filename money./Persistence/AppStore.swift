@@ -309,8 +309,9 @@ final class AppStore {
     /// Alle Vorschläge annehmen, bei denen die Maschine nicht unsicher war.
     @discardableResult
     func acceptAllConfident() -> Int {
+        // Menschen bleiben draußen: Ihre Zwecke sind zu verschieden für einen Sammelklick.
         let ids = data.proposals
-            .filter { ($0.suggestion?.band ?? .unsure) != .unsure }
+            .filter { ($0.suggestion?.band ?? .unsure) != .unsure && !$0.isPersonal }
             .map(\.id)
         accept(ids, announce: false)
         return ids.count
