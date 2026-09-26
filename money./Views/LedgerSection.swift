@@ -11,8 +11,8 @@ struct LedgerSection: View {
     let store: AppStore
     let ring: RingSummary
     let month: YearMonth
-    var transferTotal: Decimal = 0
-    var transferCount: Int = 0
+    var neutralTotal: Decimal = 0
+    var neutralCount: Int = 0
     @Binding var selection: RingSelection?
     @Binding var expanded: UUID?
     let onEdit: (Entry) -> Void
@@ -37,7 +37,7 @@ struct LedgerSection: View {
                     }
                 }
             }
-            if transferCount > 0 { transfersRow }
+            if neutralCount > 0 { neutralRow }
         }
         .animation(motion, value: expanded)
         .animation(motion, value: ring)
@@ -206,15 +206,18 @@ struct LedgerSection: View {
         .padding(.vertical, 7)
     }
 
-    // MARK: - Umbuchungen
+    // MARK: - Neutral
 
-    private var transfers: [Entry] {
+    /// Umbuchungen und Ausgleiche des Monats, neueste zuerst.
+    private var neutralEntries: [Entry] {
         store.data.entries
-            .filter { $0.kind == .transfer && $0.month == month }
+            .filter { $0.month == month && ($0.kind == .transfer || ($0.kind == .refund && $0.status != .proposed)) }
             .sorted { ($0.date, $0.createdAt) > ($1.date, $1.createdAt) }
     }
 
-    private var transfersRow: some View {
+    /// Bewusst gedämpft: kein Farbton, kein Balken. Es ist Geld, das sich bewegt hat,
+    /// ohne etwas zu kosten — man soll es finden, nicht sehen müssen.
+    private var neutralRow: some View {
         CardStack {
             Button {
                 showsTransfers.toggle()
@@ -225,11 +228,14 @@ struct LedgerSection: View {
                         .foregroundStyle(Palette.faint)
                         .frame(width: 38, height: 38)
                         .background(Circle().fill(Palette.raised))
-                    Text("\(transferCount) Umbuchungen")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(Palette.muted)
+                    HStack(spacing: 6) {
+                        Text("Neutral")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(Palette.muted)
+                        CountChip(count: neutralCount)
+                    }
                     Spacer()
-                    Text(MoneyFormat.hero(transferTotal))
+                    Text(MoneyFormat.hero(neutralTotal))
                         .font(.callout.weight(.semibold))
                         .monospacedDigit()
                         .foregroundStyle(Palette.muted)
@@ -243,49 +249,72 @@ struct LedgerSection: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(PressableRowStyle())
+            .accessibilityLabel("Neutral: \(neutralCount) Umbuchungen und Ausgleiche")
             .accessibilityHint("Zählen nirgends mit")
 
             if showsTransfers {
                 VStack(spacing: 0) {
-                    ForEach(transfers) { entry in
-                        HStack(spacing: 10) {
-                            Text(MoneyFormat.day(entry.date))
-                                .font(.subheadline)
-                                .foregroundStyle(Palette.ink)
-                            Text(entry.title)
-                                .font(.caption)
-                                .foregroundStyle(Palette.muted)
-                                .lineLimit(1)
-                            Spacer(minLength: 6)
-                            Text(MoneyFormat.signed(entry.signedAmount))
-                                .font(.subheadline)
-                                .monospacedDigit()
-                                .foregroundStyle(Palette.muted)
-                            Menu {
-                                Button { onRecategorize(entry) } label: {
-                                    Label("Doch zählen — Kategorie wählen", systemImage: "tag")
-                                }
-                                Button(role: .destructive) { store.deleteEntry(entry.id) } label: {
-                                    Label("Löschen", systemImage: "trash")
-                                }
-                            } label: {
-                                Image(systemName: "ellipsis")
-                                    .font(.footnote.weight(.semibold))
-                                    .foregroundStyle(Palette.faint)
-                                    .frame(width: 30, height: 30)
-                                    .contentShape(Rectangle())
-                            }
-                        }
-                        .padding(.leading, Metrics.cardPadding + 6)
-                        .padding(.trailing, Metrics.cardPadding - 6)
-                        .padding(.vertical, 6)
-                    }
+                    ForEach(neutralEntries) { entry in neutralEntryRow(entry) }
                 }
                 .padding(.bottom, 6)
                 .background(Palette.raised.opacity(0.5))
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
+        .opacity(0.85)
+    }
+
+    private func neutralEntryRow(_ entry: Entry) -> some View {
+        let original = entry.refundOf.flatMap { store.entry($0) }
+        return HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 6) {
+                    Text(MoneyFormat.day(entry.date))
+                        .font(.subheadline)
+                        .foregroundStyle(Palette.ink)
+                    Text(entry.kind == .transfer ? "Umbuchung" : "Ausgleich")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(Palette.faint)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(Palette.raised))
+                }
+                Text(entry.kind == .refund && original != nil
+                     ? "\(entry.title) → \(original?.title.isEmpty == false ? original!.title : (store.data.category(entry.categoryID)?.name ?? ""))"
+                     : entry.title)
+                    .font(.caption)
+                    .foregroundStyle(Palette.muted)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 6)
+            Text(MoneyFormat.signed(entry.signedAmount))
+                .font(.subheadline)
+                .monospacedDigit()
+                .foregroundStyle(Palette.muted)
+            Menu {
+                if entry.kind == .refund {
+                    Button { store.unlinkRefund(entry.id) } label: {
+                        Label("Ausgleich lösen", systemImage: "arrow.uturn.forward")
+                    }
+                } else {
+                    Button { onRecategorize(entry) } label: {
+                        Label("Doch zählen — Kategorie wählen", systemImage: "tag")
+                    }
+                }
+                Button(role: .destructive) { store.deleteEntry(entry.id) } label: {
+                    Label("Löschen", systemImage: "trash")
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Palette.faint)
+                    .frame(width: 30, height: 30)
+                    .contentShape(Rectangle())
+            }
+        }
+        .padding(.leading, Metrics.cardPadding + 6)
+        .padding(.trailing, Metrics.cardPadding - 6)
+        .padding(.vertical, 6)
     }
 
     // MARK: - Ablauf

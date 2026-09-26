@@ -19,6 +19,7 @@ enum HomeSheet: Identifiable, Hashable {
     case detail(UUID)
     case report
     case link(Entry)
+    case neutral
 
     var id: String {
         switch self {
@@ -28,6 +29,7 @@ enum HomeSheet: Identifiable, Hashable {
         case .detail(let id): return "detail-\(id)"
         case .report: return "bericht"
         case .link(let entry): return "ausgleich-\(entry.id)"
+        case .neutral: return "neutral"
         }
     }
 }
@@ -154,8 +156,8 @@ struct HomeScreen: View {
                         store: store,
                         ring: summary.ring(listDirection),
                         month: month,
-                        transferTotal: summary.transferTotal,
-                        transferCount: summary.transferCount,
+                        neutralTotal: summary.neutralTotal,
+                        neutralCount: summary.neutralCount,
                         selection: $selection,
                         expanded: $expanded,
                         onEdit: { sheet = .edit($0) },
@@ -235,7 +237,8 @@ struct HomeScreen: View {
         BubbleField(
             summary: summary,
             onTap: { sheet = .detail($0.category.id) },
-            onPendingTap: { sheet = .inbox })
+            onPendingTap: { sheet = .inbox },
+            onNeutralTap: { sheet = .neutral })
             .frame(height: 340)
             .overlay(alignment: .bottom) {
                 if summary.isEmpty && !summary.hasPending {
@@ -499,6 +502,8 @@ struct HomeScreen: View {
             }
         case .link(let entry):
             RefundLinkSheet(store: store, entry: entry)
+        case .neutral:
+            NeutralSheet(store: store, month: month)
         case .report:
             if let report {
                 ImportReportSheet(report: report) {

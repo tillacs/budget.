@@ -235,26 +235,29 @@ final class AppStore {
         persist()
     }
 
-    /// Kandidaten für einen Ausgleich: zu einer Einnahme die Ausgaben der letzten
-    /// 90 Tage, zu einer Ausgabe die Eingänge der 90 Tage danach. Exakte Beträge zuerst.
+    /// Kandidaten für einen Ausgleich: zu einer Einnahme alle Ausgaben, zu einer
+    /// Ausgabe alle Eingänge — ohne Zeitfenster, denn eine Rückzahlung kann Monate
+    /// später kommen. Sortiert: gleicher Betrag zuerst, dann die zeitlich nächsten.
     func refundCandidates(for entry: Entry) -> [Entry] {
         let taken = Set(data.entries.compactMap(\.refundOf))
         let pool = data.entries.filter { other in
-            guard other.id != entry.id, other.kind == .flow, other.status != .proposed || other.source == .tradeRepublic
+            guard other.id != entry.id, other.kind == .flow,
+                  other.status != .proposed || other.source == .tradeRepublic
             else { return false }
             if entry.direction == .income {
                 return other.direction != .income && !taken.contains(other.id)
-                    && other.date <= entry.date
-                    && SuggestionEngine.daysBetween(other.date, entry.date) <= 90
             } else {
                 return other.direction == .income && other.refundOf == nil
-                    && other.date >= entry.date
-                    && SuggestionEngine.daysBetween(entry.date, other.date) <= 90
             }
+        }
+        func distance(_ other: Entry) -> Int {
+            abs(SuggestionEngine.daysBetween(other.date, entry.date))
         }
         return pool.sorted { a, b in
             let ea = a.amount == entry.amount, eb = b.amount == entry.amount
             if ea != eb { return ea }
+            let da = distance(a), db = distance(b)
+            if da != db { return da < db }
             return (a.date, a.createdAt) > (b.date, b.createdAt)
         }
     }

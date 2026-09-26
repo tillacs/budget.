@@ -37,6 +37,10 @@ nonisolated struct MonthSummary: Hashable, Sendable {
     let pending: [Direction: [Slice]]
     let transferTotal: Decimal
     let transferCount: Int
+    /// Neutral: Umbuchungen und Ausgleiche. Geld, das sich bewegt hat, ohne etwas
+    /// zu kosten oder zu bringen. Zählt nirgends, steht aber nicht im Verborgenen.
+    let neutralTotal: Decimal
+    let neutralCount: Int
 
     /// Was übrig bleibt, nachdem auch das Depot bedient ist. Negativ heißt: mehr
     /// ausgegeben und angelegt als eingenommen.
@@ -74,6 +78,7 @@ nonisolated struct MonthSummary: Hashable, Sendable {
         let counting = inMonth.filter(\.counts)
         let proposed = inMonth.filter { $0.status == .proposed && $0.kind != .transfer }
         let transfers = inMonth.filter { $0.kind == .transfer }
+        let refunds = inMonth.filter { $0.kind == .refund && $0.status != .proposed }
         var pending: [Direction: [Slice]] = [:]
         for direction in Direction.allCases {
             let slices = ring(direction, from: proposed, categories: categories).slices
@@ -86,7 +91,9 @@ nonisolated struct MonthSummary: Hashable, Sendable {
             invested: ring(.invest, from: counting, categories: categories),
             pending: pending,
             transferTotal: transfers.reduce(0) { $0 + $1.amount },
-            transferCount: transfers.count)
+            transferCount: transfers.count,
+            neutralTotal: (transfers + refunds).reduce(0) { $0 + $1.amount },
+            neutralCount: transfers.count + refunds.count)
     }
 
     private static func ring(

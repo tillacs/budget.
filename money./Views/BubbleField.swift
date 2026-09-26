@@ -19,6 +19,12 @@ struct Bubble: Identifiable, Hashable {
     let total: Decimal
     let count: Int
     let isPending: Bool
+    var isNeutral = false
+
+    /// Die neutrale Blase: Umbuchungen und Ausgleiche, klein und grau am Rand.
+    static let neutralID = "neutral"
+    static let neutralCategory = BudgetCategory(
+        id: BudgetCategory.noneID, name: "Neutral", symbol: "⇄", tint: .slate, direction: .expense)
 
     static func from(_ summary: MonthSummary) -> [Bubble] {
         var result: [Bubble] = []
@@ -33,6 +39,11 @@ struct Bubble: Identifiable, Hashable {
                     id: "p-" + slice.category.id.uuidString, category: slice.category, direction: direction,
                     total: slice.total, count: slice.count, isPending: true))
             }
+        }
+        if summary.neutralCount > 0 {
+            result.append(Bubble(
+                id: neutralID, category: neutralCategory, direction: .expense,
+                total: summary.neutralTotal, count: summary.neutralCount, isPending: false, isNeutral: true))
         }
         return result
     }
@@ -69,6 +80,8 @@ nonisolated enum BubbleLayout {
         let minRadius = 16.0
 
         var radii: [Double] = values.map { min(maxRadius, max(minRadius, k * sqrt($0))) }
+        // Die neutrale Blase hat eine feste, kleine Größe — sie soll da sein, nicht auffallen.
+        for (i, bubble) in bubbles.enumerated() where bubble.isNeutral { radii[i] = 21 }
         // Falls die Deckelung Platz freigibt oder das Minimum ihn frisst: nachziehen,
         // damit die Fläche wieder zu etwa der Hälfte gefüllt ist.
         let area = radii.reduce(0) { $0 + .pi * $1 * $1 }
@@ -81,7 +94,9 @@ nonisolated enum BubbleLayout {
             if let old = previous[bubble.id] { return old.center }
             // Neue Blasen starten nahe ihrem Zentrum, leicht versetzt — deterministisch,
             // damit dieselben Daten immer dasselbe Bild ergeben.
-            let home = center(for: bubble.direction, in: size)
+            let home = bubble.isNeutral
+                ? CGPoint(x: size.width * 0.12, y: size.height * 0.14)
+                : center(for: bubble.direction, in: size)
             let angle = Double(index) * 2.399 // goldener Winkel
             return CGPoint(x: home.x + CGFloat(cos(angle)) * 18, y: home.y + CGFloat(sin(angle)) * 18)
         }
@@ -90,7 +105,9 @@ nonisolated enum BubbleLayout {
         for step in 0..<220 {
             let pull: CGFloat = step < 60 ? 0.045 : 0.03
             for i in bubbles.indices {
-                let home = center(for: bubbles[i].direction, in: size)
+                let home = bubbles[i].isNeutral
+                    ? CGPoint(x: size.width * 0.12, y: size.height * 0.14)
+                    : center(for: bubbles[i].direction, in: size)
                 points[i].x += (home.x - points[i].x) * pull
                 points[i].y += (home.y - points[i].y) * pull
             }
@@ -127,6 +144,7 @@ struct BubbleField: View {
     let summary: MonthSummary
     let onTap: (Bubble) -> Void
     let onPendingTap: () -> Void
+    var onNeutralTap: () -> Void = {}
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var placements: [String: BubbleLayout.Placement] = [:]
@@ -144,7 +162,11 @@ struct BubbleField: View {
                     if let placement = placements[bubble.id] {
                         BubbleView(bubble: bubble, radius: placement.radius, showsAmount: holding)
                             .position(placement.center)
-                            .onTapGesture { bubble.isPending ? onPendingTap() : onTap(bubble) }
+                            .onTapGesture {
+                                if bubble.isNeutral { onNeutralTap() }
+                                else if bubble.isPending { onPendingTap() }
+                                else { onTap(bubble) }
+                            }
                             .transition(.scale(scale: 0.2).combined(with: .opacity))
                     }
                 }
@@ -207,7 +229,12 @@ private struct BubbleView: View {
 
     var body: some View {
         ZStack {
-            if bubble.isPending {
+            if bubble.isNeutral {
+                Circle()
+                    .fill(Palette.raised.opacity(0.9))
+                Circle()
+                    .strokeBorder(Palette.hairline, lineWidth: 1)
+            } else if bubble.isPending {
                 Circle()
                     .fill(tint.opacity(0.10))
                 Circle()
@@ -223,9 +250,23 @@ private struct BubbleView: View {
             }
 
             VStack(spacing: 1) {
-                Text(bubble.category.symbol)
-                    .font(.system(size: max(12, min(34, radius * 0.72))))
-                if showsAmount || radius > 44 {
+                if bubble.isNeutral {
+                    Image(systemName: "arrow.left.arrow.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Palette.faint)
+                } else {
+                    Text(bubble.category.symbol)
+                        .font(.system(size: max(12, min(34, radius * 0.72))))
+                }
+                if bubble.isNeutral && showsAmount {
+                    Text(MoneyFormat.hero(bubble.total))
+                        .font(.system(size: 9, weight: .semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(Palette.muted)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .transition(.opacity)
+                } else if !bubble.isNeutral && (showsAmount || radius > 44) {
                     Text(showsAmount ? MoneyFormat.hero(bubble.total) : bubble.category.name)
                         .font(.system(size: max(9, min(13, radius * 0.24)), weight: .semibold))
                         .monospacedDigit()
@@ -239,10 +280,12 @@ private struct BubbleView: View {
             .frame(width: radius * 1.9)
         }
         .frame(width: radius * 2, height: radius * 2)
-        .shadow(color: bubble.isPending ? .clear : tint.opacity(0.28), radius: radius * 0.25, y: radius * 0.12)
+        .shadow(color: bubble.isPending || bubble.isNeutral ? .clear : tint.opacity(0.28), radius: radius * 0.25, y: radius * 0.12)
         .contentShape(Circle())
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(bubble.category.name), \(MoneyFormat.amount(bubble.total))\(bubble.isPending ? ", vorgeschlagen" : "")")
+        .accessibilityLabel(bubble.isNeutral
+            ? "Neutral: \(bubble.count) Umbuchungen und Ausgleiche, \(MoneyFormat.amount(bubble.total))"
+            : "\(bubble.category.name), \(MoneyFormat.amount(bubble.total))\(bubble.isPending ? ", vorgeschlagen" : "")")
         .accessibilityAddTraits(.isButton)
     }
 }

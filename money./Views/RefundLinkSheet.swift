@@ -13,11 +13,30 @@ struct RefundLinkSheet: View {
     let entry: Entry
 
     @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
 
     private var candidates: [Entry] { store.refundCandidates(for: entry) }
-    private var exact: [Entry] { candidates.filter { $0.amount == entry.amount } }
-    private var others: [Entry] { candidates.filter { $0.amount != entry.amount } }
     private var isInbound: Bool { entry.direction == .income }
+
+    /// Suche über Name, Notiz, Kategorie und Betrag — „DB" findet die Bahn.
+    private var matching: [Entry] {
+        let needle = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !needle.isEmpty else { return candidates }
+        return candidates.filter { item in
+            let category = store.data.category(item.categoryID)?.name ?? ""
+            let haystack = [item.title, item.note, item.merchant ?? "", category,
+                            MoneyFormat.amount(item.amount), MoneyFormat.plain(item.amount)]
+                .joined(separator: " ").lowercased()
+            return haystack.contains(needle)
+        }
+    }
+    private var exact: [Entry] { matching.filter { $0.amount == entry.amount } }
+    private var recent: [Entry] {
+        matching.filter { $0.amount != entry.amount && abs(SuggestionEngine.daysBetween($0.date, entry.date)) <= 90 }
+    }
+    private var older: [Entry] {
+        matching.filter { $0.amount != entry.amount && abs(SuggestionEngine.daysBetween($0.date, entry.date)) > 90 }
+    }
 
     var body: some View {
         NavigationStack {
@@ -28,9 +47,10 @@ struct RefundLinkSheet: View {
                 } header: {
                     Text(isInbound ? "Dieser Eingang gleicht aus …" : "Diese Ausgabe wird ausgeglichen durch …")
                 }
-                if candidates.isEmpty {
-                    Text(isInbound ? "Keine Ausgabe in den 90 Tagen davor."
-                                   : "Kein Eingang in den 90 Tagen danach.")
+                if matching.isEmpty {
+                    Text(query.isEmpty
+                         ? (isInbound ? "Keine Ausgaben vorhanden." : "Keine Eingänge vorhanden.")
+                         : "Nichts gefunden für \u{201E}\(query)\u{201C}.")
                         .font(.subheadline)
                         .foregroundStyle(Palette.muted)
                         .listRowBackground(Palette.card)
@@ -40,15 +60,21 @@ struct RefundLinkSheet: View {
                         ForEach(exact) { candidate in pick(candidate) }
                     }
                 }
-                if !others.isEmpty {
-                    Section("Andere Beträge") {
-                        ForEach(others) { candidate in pick(candidate) }
+                if !recent.isEmpty {
+                    Section(isInbound ? "Davor und danach, 90 Tage" : "Danach, 90 Tage") {
+                        ForEach(recent) { candidate in pick(candidate) }
+                    }
+                }
+                if !older.isEmpty {
+                    Section("Früher") {
+                        ForEach(older.prefix(query.isEmpty ? 60 : 300)) { candidate in pick(candidate) }
                     }
                 }
             }
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
             .background(Palette.canvas)
+            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Name, Kategorie oder Betrag")
             .navigationTitle("Ausgleich")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -59,7 +85,7 @@ struct RefundLinkSheet: View {
             }
         }
         .tint(Palette.accent)
-        .presentationDetents([.medium, .large])
+        .presentationDetents([.large])
     }
 
     private func pick(_ candidate: Entry) -> some View {
@@ -88,7 +114,7 @@ struct RefundLinkSheet: View {
                     .font(.subheadline.weight(highlighted ? .semibold : .medium))
                     .foregroundStyle(Palette.ink)
                     .lineLimit(1)
-                Text(MoneyFormat.day(item.date))
+                Text(MoneyFormat.dayLong(item.date))
                     .font(.caption)
                     .foregroundStyle(Palette.faint)
             }
