@@ -73,15 +73,17 @@ struct LedgerSection: View {
                 HStack(spacing: 12) {
                     CategoryBadge(category: slice.category, side: 38)
 
+                    // Der Name gibt nach — schrumpft, dann kürzt er. Der Betrag nie:
+                    // ein abgeschnittener Betrag ist keiner.
                     HStack(spacing: 6) {
                         Text(slice.category.name)
                             .font(.body.weight(.medium))
                             .foregroundStyle(Palette.ink)
                             .lineLimit(1)
-                            .minimumScaleFactor(0.8)
+                            .minimumScaleFactor(0.7)
+                            .truncationMode(.tail)
                         CountChip(count: slice.count)
                     }
-                    .layoutPriority(1)
 
                     Spacer(minLength: 6)
 
@@ -91,12 +93,15 @@ struct LedgerSection: View {
                         .contentTransition(.numericText())
                         .foregroundStyle(Palette.ink)
                         .lineLimit(1)
+                        .fixedSize()
+                        .layoutPriority(2)
 
                     Text(MoneyFormat.share(slice.share))
                         .font(.caption2)
                         .monospacedDigit()
                         .foregroundStyle(Palette.faint)
                         .frame(width: 42, alignment: .trailing)
+                        .layoutPriority(2)
                 }
 
                 shareBar(slice)
